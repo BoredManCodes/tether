@@ -42,6 +42,13 @@ export function openDb(dataDir) {
       accessibility_active INTEGER,
       notif_listener_active INTEGER,
       offline_alerted_at INTEGER,
+      cell_type TEXT,
+      cell_level INTEGER,
+      cell_dbm INTEGER,
+      wifi_connected INTEGER,
+      wifi_ssid TEXT,
+      wifi_level INTEGER,
+      wifi_rssi INTEGER,
       created_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS locations (
@@ -156,6 +163,10 @@ export function openDb(dataDir) {
   if (!columns('devices').includes('accessibility_active')) db.exec('ALTER TABLE devices ADD COLUMN accessibility_active INTEGER');
   if (!columns('devices').includes('notif_listener_active')) db.exec('ALTER TABLE devices ADD COLUMN notif_listener_active INTEGER');
   if (!columns('devices').includes('offline_alerted_at')) db.exec('ALTER TABLE devices ADD COLUMN offline_alerted_at INTEGER');
+  for (const [col, type] of [['cell_type', 'TEXT'], ['cell_level', 'INTEGER'], ['cell_dbm', 'INTEGER'],
+    ['wifi_connected', 'INTEGER'], ['wifi_ssid', 'TEXT'], ['wifi_level', 'INTEGER'], ['wifi_rssi', 'INTEGER']]) {
+    if (!columns('devices').includes(col)) db.exec(`ALTER TABLE devices ADD COLUMN ${col} ${type}`);
+  }
 
   return db;
 }

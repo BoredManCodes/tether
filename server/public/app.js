@@ -88,6 +88,7 @@ const fmtDur = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${M
 // ---------- Tabler building blocks ----------
 const rowFlex = 'd-flex flex-wrap align-items-center gap-2';
 const input = (attrs) => h('input', { ...attrs, class: `form-control ${attrs.class || ''}`.trim() });
+const bars = (level) => `${level}/4`;
 const stat = (value, label, cls = '') => h('div', { class: 'col-sm-6 col-lg-4' },
   h('div', { class: 'card card-body' }, h('div', { class: 'subheader' }, label), h('div', { class: `h1 mb-0 ${cls}`.trim() }, value)));
 const formCard = (...kids) => h('div', { class: 'card mb-3' }, h('div', { class: 'card-body' }, ...kids));
@@ -235,7 +236,11 @@ const VIEWS = {
       h('div', { class: 'row row-cards mb-3' },
         stat(d.battery_pct == null ? '-' : `${d.battery_pct}%`, d.charging ? 'Battery, charging' : 'Battery'),
         stat(ago(d.last_seen), 'Last check-in', stale ? 'text-warning' : ''),
-        stat(d.locked ? 'Locked' : 'Open', d.locked ? 'Only phone and SMS' : 'All apps available')),
+        stat(d.locked ? 'Locked' : 'Open', d.locked ? 'Only phone and SMS' : 'All apps available'),
+        stat(d.cell_level == null ? (d.cell_type || '-') : `${d.cell_type ? d.cell_type + ' ' : ''}${bars(d.cell_level)}`,
+          d.cell_dbm == null ? 'Mobile signal' : `Mobile signal, ${d.cell_dbm} dBm`),
+        stat(d.wifi_connected ? (d.wifi_ssid || 'Connected') : (d.wifi_connected == null ? '-' : 'Not on Wi-Fi'),
+          d.wifi_connected && d.wifi_level != null ? `Wi-Fi ${bars(d.wifi_level)}${d.wifi_rssi == null ? '' : `, ${d.wifi_rssi} dBm`}` : 'Wi-Fi')),
       h('div', { class: `card card-body ${rowFlex} flex-row mb-3` }, actionBtn('Locate now', 'LOCATE'), actionBtn('Lock to phone and SMS', 'LOCK', 'btn-outline-danger'),
         actionBtn('Unlock', 'UNLOCK'), actionBtn('Ring', 'RING'), liveBtn, saveBtn),
       h('div', { class: 'mb-3' }, frame));

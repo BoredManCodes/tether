@@ -257,7 +257,9 @@ app.get('/api/devices/:id/search', auth, async (req, reply) => {
 });
 
 app.get('/api/devices', auth, async (req) =>
-  db.prepare(`SELECT id, name, battery_pct, charging, locked, last_seen FROM devices WHERE user_id = ?`).all(req.user.id));
+  db.prepare(`SELECT id, name, battery_pct, charging, locked, last_seen,
+    cell_type, cell_level, cell_dbm, wifi_connected, wifi_ssid, wifi_level, wifi_rssi
+    FROM devices WHERE user_id = ?`).all(req.user.id));
 
 function listRoute(table, cols, orderCol = 'ts') {
   app.get(`/api/devices/:id/${table}`, auth, async (req, reply) => {
@@ -379,9 +381,13 @@ app.post('/api/device/sync', dev, async (req) => {
     if (b.status) {
       db.prepare(`UPDATE devices SET battery_pct = ?, charging = ?, locked = ?,
         admin_active = coalesce(?, admin_active), accessibility_active = coalesce(?, accessibility_active),
-        notif_listener_active = coalesce(?, notif_listener_active) WHERE id = ?`)
+        notif_listener_active = coalesce(?, notif_listener_active),
+        cell_type = ?, cell_level = ?, cell_dbm = ?,
+        wifi_connected = ?, wifi_ssid = ?, wifi_level = ?, wifi_rssi = ? WHERE id = ?`)
         .run(b.status.battery_pct ?? null, b.status.charging ? 1 : 0, b.status.locked ? 1 : 0,
-          boolOrNull(b.status.admin_active), boolOrNull(b.status.accessibility_active), boolOrNull(b.status.notif_listener_active), id);
+          boolOrNull(b.status.admin_active), boolOrNull(b.status.accessibility_active), boolOrNull(b.status.notif_listener_active),
+          str(b.status.cell_type, 8), b.status.cell_level ?? null, b.status.cell_dbm ?? null,
+          boolOrNull(b.status.wifi_connected), str(b.status.wifi_ssid, 64), b.status.wifi_level ?? null, b.status.wifi_rssi ?? null, id);
     }
     const insLoc = db.prepare('INSERT INTO locations (device_id, ts, lat, lon, accuracy) VALUES (?, ?, ?, ?, ?)');
     for (const l of b.locations || []) insLoc.run(id, l.ts, l.lat, l.lon, l.accuracy ?? null);
