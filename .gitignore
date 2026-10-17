@@ -1,0 +1,21 @@
+# secrets and runtime data
+.env
+*.db
+*.db-shm
+*.db-wal
+data/
+local.properties
+*.apk
+*.keystore
+*.jks
+
+# build output and tooling
+node_modules/
+build/
+.gradle/
+.idea/
+.playwright-mcp/
+
+# device captures
+android/phone_screenshot*.png
+android/ui.xml

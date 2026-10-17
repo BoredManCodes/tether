@@ -1,0 +1,15 @@
+/* Layout comes from Tabler; only app-specific bits live here. */
+#map { height: 320px; border-radius: 4px; }
+.msg { white-space: pre-wrap; word-break: break-word; }
+.chat-row { display: flex; margin: 6px 0; }
+.chat-row.out { justify-content: flex-end; }
+.bubble { max-width: 75%; padding: 8px 12px; border-radius: 14px; background: var(--tblr-bg-surface-secondary); }
+.bubble.out { background: var(--tblr-primary); color: var(--tblr-primary-fg); border-bottom-right-radius: 4px; }
+.bubble.in { border-bottom-left-radius: 4px; }
+.bubble .time { display: block; font-size: 11px; opacity: .65; margin-top: 3px; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; background: var(--tblr-bg-surface-secondary); cursor: pointer; }
+#screen { max-width: 100%; max-height: 70vh; display: block; border-radius: 4px; }
+.alert-unread { background: var(--tblr-warning-lt); }
+.tabs-scroll { overflow-x: auto; flex-wrap: nowrap; }
+.tabs-scroll .nav-link { white-space: nowrap; }
