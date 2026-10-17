@@ -47,3 +47,7 @@ Put it behind a TLS reverse proxy. The seeded admin must change the password at 
 - The VPN sees domains only. Apps with their own or encrypted DNS are not visible.
 - Android allows one VPN at a time; Tether's replaces any other VPN app.
 - Anyone with the parent PIN or physical access to a non-Device-Owner phone can remove the app.
+
+## Licence
+
+MIT. Third-party assets in `server/public/vendor` keep their own licences.
