@@ -109,4 +109,17 @@ object LockManager {
             // Package not installed, or a system package that can't be suspended.
         }
     }
+
+    /** Hides or unhides one package (gone from launcher and settings, data kept).
+     *  Same guard as suspension: never ourselves, the dialer or the SMS app. */
+    fun setPackageHidden(ctx: Context, pkg: String, hidden: Boolean) {
+        val manager = dpm(ctx)
+        if (!manager.isDeviceOwnerApp(ctx.packageName)) return
+        if (pkg in allowedPackages(ctx)) return
+        try {
+            manager.setApplicationHidden(adminComponent(ctx), pkg, hidden)
+        } catch (_: Exception) {
+            // Package not installed.
+        }
+    }
 }

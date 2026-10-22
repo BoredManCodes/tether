@@ -5,14 +5,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.net.Uri
 import android.os.*
 import androidx.core.app.NotificationCompat
 import com.trentbuckley.tether.Prefs
 import com.trentbuckley.tether.admin.Hardening
 import com.trentbuckley.tether.admin.LockManager
+import com.trentbuckley.tether.admin.Ringer
 import com.trentbuckley.tether.net.Api
 import com.trentbuckley.tether.screen.ScreenStream
 import org.json.JSONObject
@@ -96,6 +94,8 @@ class TetherSyncService : Service() {
                 thread { ScheduleManager.checkAndApply(this@TetherSyncService) }
                 thread { AppRuleManager.checkAndApply(this@TetherSyncService) }
                 thread { Hardening.apply(this@TetherSyncService) }
+                thread { KeywordWatch.refresh(this@TetherSyncService) }
+                thread { AdBlock.refresh(this@TetherSyncService) }
                 handler.postDelayed(this, SYNC_INTERVAL_MS)
             }
         }
@@ -157,18 +157,7 @@ class TetherSyncService : Service() {
         }
     }
 
-    private fun ring() {
-        val uri = Uri.parse("content://settings/system/notification_sound")
-        val player = MediaPlayer()
-        player.setAudioAttributes(
-            AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
-        )
-        player.setDataSource(this, uri)
-        player.isLooping = false
-        player.setOnCompletionListener { it.release() }
-        player.prepare()
-        player.start()
-    }
+    private fun ring() = Ringer.ring(this)
 
     companion object {
         private const val NOTIF_ID = 1

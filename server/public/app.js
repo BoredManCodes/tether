@@ -428,10 +428,66 @@ const VIEWS = {
 
   async sites(body) {
     const rows = await api(`/api/devices/${deviceId}/sites`);
-    body.append(h('p', { class: 'text-secondary' }, 'Domains the phone looked up in the last 24 hours, from the Tether VPN. Shows the site, not the page. Lookups from apps with their own DNS or encrypted DNS do not appear.'),
-      listCard(rows.map((r) => listItem('', h('div', { class: rowFlex },
-        h('b', {}, r.domain), badge(`${r.hits}×`), r.app_name ? badge(r.app_name, 'bg-blue-lt') : null,
-        h('span', { class: 'text-secondary ms-auto' }, fmtTime(r.last_ts))))), 'No lookups recorded yet.'));
+    const ab = await api(`/api/devices/${deviceId}/adblock`);
+    const labels = Object.fromEntries(ab.categories.map((c) => [c.key, c.label]));
+    const abStatus = h('span', { class: 'text-secondary' });
+    const save = async () => {
+      try { await api(`/api/devices/${deviceId}/adblock`, { method: 'PUT', body: { enabled: ab.enabled, cats: ab.cats } }); abStatus.textContent = 'Saved. The phone picks it up at its next sync.'; }
+      catch (e) { abStatus.textContent = e.message; }
+    };
+    const master = h('input', { type: 'checkbox', class: 'form-check-input', checked: ab.enabled });
+    master.addEventListener('change', () => { ab.enabled = master.checked; save(); });
+    const catBoxes = ab.categories.map((c) => {
+      const box = h('input', { type: 'checkbox', class: 'form-check-input', checked: ab.cats.includes(c.key) });
+      box.addEventListener('change', () => { ab.cats = box.checked ? [...ab.cats, c.key] : ab.cats.filter((k) => k !== c.key); save(); });
+      return h('label', { class: 'd-flex align-items-center gap-2' }, box, c.label,
+        c.count != null ? h('span', { class: 'text-secondary' }, `${c.count.toLocaleString()} domains`) : h('span', { class: 'text-secondary' }, 'downloading'));
+    });
+
+    const customList = h('div', { class: 'd-flex flex-column gap-2 mt-3' });
+    const siteList = h('div');
+    const blockedNow = (r) => r.blocked || ab.custom.some((d) => r.domain === d || r.domain.endsWith(`.${d}`));
+    const renderCustom = () => {
+      customList.replaceChildren(...ab.custom.map((d) => h('div', { class: rowFlex }, h('b', {}, d), badge('subdomains too', 'bg-secondary-lt'),
+        h('button', { class: 'btn btn-sm ms-auto', onclick: async () => {
+          await api(`/api/devices/${deviceId}/blocked-domains/${encodeURIComponent(d)}`, { method: 'DELETE' });
+          ab.custom = ab.custom.filter((x) => x !== d); renderCustom(); renderSites();
+        } }, 'Unblock'))));
+    };
+    const addCustom = async (raw) => {
+      const r = await api(`/api/devices/${deviceId}/blocked-domains`, { method: 'POST', body: { domain: raw } });
+      if (!ab.custom.includes(r.domain)) ab.custom = [...ab.custom, r.domain].sort();
+      renderCustom(); renderSites();
+      return r.domain;
+    };
+    const renderSites = () => siteList.replaceChildren(listCard(rows.map((r) => listItem('', h('div', { class: rowFlex },
+      h('b', {}, r.domain), badge(`${r.hits}×`),
+      r.category ? badge(labels[r.category] || r.category, 'bg-purple-lt') : null,
+      r.app_name ? badge(r.app_name, 'bg-blue-lt') : null,
+      blockedNow(r) ? badge('Blocked', 'bg-red-lt') : h('button', { class: 'btn btn-sm', onclick: async (e) => {
+        try { await addCustom(r.domain); } catch (err) { e.target.textContent = err.message; }
+      } }, 'Block'),
+      h('span', { class: 'text-secondary ms-auto' }, fmtTime(r.last_ts))))), 'No lookups recorded yet.'));
+
+    const domainInput = input({ placeholder: 'Domain to block, e.g. example.com', class: 'w-auto', style: 'min-width:260px' });
+    const addStatus = h('span', { class: 'text-secondary' });
+    const doAdd = async () => {
+      try { const d = await addCustom(domainInput.value); domainInput.value = ''; addStatus.textContent = `Blocked ${d} and its subdomains.`; }
+      catch (e) { addStatus.textContent = e.message === 'invalid_domain' ? 'Not a valid domain.' : e.message; }
+    };
+    domainInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+
+    body.append(formCard(
+      h('label', { class: rowFlex }, master, h('b', {}, 'Block by category'), abStatus),
+      h('p', { class: 'text-secondary mt-2' }, 'DNS filter: lookups for listed domains get no answer. It cannot remove ads served from the same domain as the content, such as YouTube video ads. Lists refresh daily.'),
+      h('div', { class: 'd-flex flex-column gap-2' }, catBoxes),
+      h('hr'),
+      h('b', {}, 'Block a domain'),
+      h('div', { class: `${rowFlex} mt-2` }, domainInput, h('button', { class: 'btn btn-primary', onclick: doAdd }, 'Block'), addStatus),
+      customList));
+    body.append(h('p', { class: 'text-secondary' }, 'Domains the phone looked up in the last 24 hours, from the Tether VPN. Shows the site, not the page. Lookups from apps with their own DNS or encrypted DNS do not appear.'), siteList);
+    renderCustom();
+    renderSites();
   },
 
   async geofences(body) {
@@ -479,23 +535,24 @@ const VIEWS = {
     } }, me.mfa_enabled ? 'Turn off email codes at sign-in' : 'Turn on email codes at sign-in');
     const kwList = h('div', { class: 'd-flex flex-column gap-2' });
     const renderKw = (items) => {
-      kwList.replaceChildren(...items.map((k) => h('div', { class: rowFlex }, k.word,
+      kwList.replaceChildren(...items.map((k) => h('div', { class: rowFlex }, k.is_regex ? badge('Regex') : '', k.word,
         h('button', { class: 'btn btn-sm', onclick: async () => { await api(`/api/keywords/${k.id}`, { method: 'DELETE' }); renderKw(items.filter((x) => x.id !== k.id)); } }, 'Remove'))));
-      if (!items.length) kwList.append('No keywords set. Add words below to get an alert whenever they show up in a message or notification.');
+      if (!items.length) kwList.append('No keywords set. Add words or regex patterns below to get an alert whenever they show up in a message, notification or on screen.');
     };
     renderKw(keywords);
-    const kwInput = input({ placeholder: 'Word or phrase', class: 'w-auto' });
+    const kwInput = input({ placeholder: 'Word, phrase or regex', class: 'w-auto' });
+    const kwRegex = h('input', { type: 'checkbox', class: 'form-check-input' });
     body.append(
       formCard(h('b', {}, 'Alert email'), h('p', { class: 'text-secondary' }, 'Where alerts and sign-in codes are sent.'),
         h('div', { class: rowFlex }, emailInput, h('button', { class: 'btn btn-primary', onclick: async () => {
           try { await api('/api/auth/alert-email', { method: 'POST', body: { email: emailInput.value || null } }); emailStatus.textContent = 'Saved.'; } catch (e) { emailStatus.textContent = e.message; }
         } }, 'Save'), emailStatus)),
       formCard(h('b', {}, 'Two-factor sign-in'), h('p', { class: 'text-secondary' }, 'Email a 6-digit code every time someone signs in.'), mfaBtn),
-      formCard(h('b', {}, 'Keyword alerts'), h('p', { class: 'text-secondary' }, 'Applies to every phone on this account, across SMS and app notifications.'),
-        kwList, h('div', { class: `${rowFlex} mt-3` }, kwInput, h('button', { class: 'btn btn-primary', onclick: async () => {
+      formCard(h('b', {}, 'Keyword alerts'), h('p', { class: 'text-secondary' }, 'Applies to every phone on this account: SMS, app notifications and on-screen text. Regex is case-insensitive and must match what Java and JavaScript both accept.'),
+        kwList, h('div', { class: `${rowFlex} mt-3` }, kwInput, h('label', { class: 'form-check m-0' }, kwRegex, ' Regex'), h('button', { class: 'btn btn-primary', onclick: async () => {
           const word = kwInput.value.trim();
           if (!word) return;
-          try { const k = await api('/api/keywords', { method: 'POST', body: { word } }); renderKw([...keywords, k]); keywords.push(k); kwInput.value = ''; } catch (e) { alert(e.message); }
+          try { const k = await api('/api/keywords', { method: 'POST', body: { word, regex: kwRegex.checked } }); renderKw([...keywords, k]); keywords.push(k); kwInput.value = ''; } catch (e) { alert(e.message); }
         } }, 'Add'))));
   },
 };

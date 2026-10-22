@@ -1,6 +1,8 @@
 package com.trentbuckley.tether.sync
 
+import android.content.ContentResolver
 import android.content.Context
+import android.os.Bundle
 import android.provider.MediaStore
 import com.trentbuckley.tether.Prefs
 import java.io.OutputStream
@@ -24,13 +26,15 @@ object MediaUploader {
         var maxDateAdded = since
 
         val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED)
-        val cursor = ctx.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            "${MediaStore.Images.Media.DATE_ADDED} > ?",
-            arrayOf(since.toString()),
-            "${MediaStore.Images.Media.DATE_ADDED} ASC LIMIT $MAX_PER_SCAN"
-        ) ?: return
+        // Android 11+ rejects LIMIT inside the sort-order string; the limit goes in the query Bundle.
+        val args = Bundle().apply {
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, "${MediaStore.Images.Media.DATE_ADDED} > ?")
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf(since.toString()))
+            putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, "${MediaStore.Images.Media.DATE_ADDED} ASC")
+            putInt(ContentResolver.QUERY_ARG_LIMIT, MAX_PER_SCAN)
+        }
+        val cursor = ctx.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, args, null)
+            ?: return
 
         cursor.use {
             while (it.moveToNext()) {
@@ -50,7 +54,7 @@ object MediaUploader {
         if (maxDateAdded > since) sp.edit().putLong("media", maxDateAdded).apply()
     }
 
-    private fun upload(ctx: Context, bytes: ByteArray, kind: String, tsMs: Long) {
+    fun upload(ctx: Context, bytes: ByteArray, kind: String, tsMs: Long) {
         val base = Prefs.serverUrl(ctx) ?: return
         val token = Prefs.deviceToken(ctx) ?: return
         val boundary = "tether-${UUID.randomUUID()}"

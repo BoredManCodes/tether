@@ -21,6 +21,10 @@ object Prefs {
     private const val KEY_SCHEDULE_LOCK_ACTIVE = "schedule_lock_active"
     private const val KEY_LIMIT_SUSPENDED_DAY = "limit_suspended_day"
     private const val KEY_LIMIT_SUSPENDED_PKGS = "limit_suspended_pkgs"
+    private const val KEY_BLOCKED_HIDDEN_PKGS = "blocked_hidden_pkgs"
+    private const val KEY_KEYWORDS = "keywords"
+    private const val KEY_REGEXES = "keyword_regexes"
+    private const val KEY_BLOCKLIST_VERSION = "blocklist_version"
 
     private fun sp(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -55,6 +59,24 @@ object Prefs {
     fun commandSecret(ctx: Context): String? = sp(ctx).getString(KEY_COMMAND_SECRET, null)
     fun setCommandSecret(ctx: Context, secret: String) = sp(ctx).edit().putString(KEY_COMMAND_SECRET, secret).apply()
 
+    /** Lowercased keyword list mirrored from the server, so matching works offline. */
+    fun keywords(ctx: Context): Set<String> =
+        sp(ctx).getStringSet(KEY_KEYWORDS, emptySet()) ?: emptySet()
+    /** Regex patterns, kept as written: lowercasing would turn \S into \s. */
+    fun regexes(ctx: Context): Set<String> =
+        sp(ctx).getStringSet(KEY_REGEXES, emptySet()) ?: emptySet()
+    fun setKeywords(ctx: Context, words: List<String>, regexes: List<String>) {
+        val clean = words.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+        sp(ctx).edit()
+            .putStringSet(KEY_KEYWORDS, clean)
+            .putStringSet(KEY_REGEXES, regexes.filter { it.isNotBlank() }.toSet())
+            .apply()
+    }
+
+    /** Server version of the DNS blocklist on disk, so a change is re-downloaded and nothing else is. */
+    fun blocklistVersion(ctx: Context): String? = sp(ctx).getString(KEY_BLOCKLIST_VERSION, null)
+    fun setBlocklistVersion(ctx: Context, v: String) = sp(ctx).edit().putString(KEY_BLOCKLIST_VERSION, v).apply()
+
     /** Whether the current lock state was put in place by schedule enforcement, vs a manual/SMS LOCK. */
     fun isScheduleLockActive(ctx: Context): Boolean = sp(ctx).getBoolean(KEY_SCHEDULE_LOCK_ACTIVE, false)
     fun setScheduleLockActive(ctx: Context, active: Boolean) = sp(ctx).edit().putBoolean(KEY_SCHEDULE_LOCK_ACTIVE, active).apply()
@@ -71,5 +93,12 @@ object Prefs {
             .putString(KEY_LIMIT_SUSPENDED_DAY, day)
             .putStringSet(KEY_LIMIT_SUSPENDED_PKGS, pkgs)
             .apply()
+    }
+
+    /** Packages hidden by a block rule, so one that is later unblocked gets unhidden. */
+    fun blockedHiddenPackages(ctx: Context): Set<String> =
+        sp(ctx).getStringSet(KEY_BLOCKED_HIDDEN_PKGS, emptySet()) ?: emptySet()
+    fun setBlockedHiddenPackages(ctx: Context, pkgs: Set<String>) {
+        sp(ctx).edit().putStringSet(KEY_BLOCKED_HIDDEN_PKGS, pkgs).apply()
     }
 }

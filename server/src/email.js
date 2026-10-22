@@ -25,7 +25,8 @@ function renderHtml(subject, text) {
 </body></html>`;
 }
 
-export async function sendEmail(app, { to, subject, text }) {
+// attachments: [{ filename, mimetype, buf }]
+export async function sendEmail(app, { to, subject, text, attachments }) {
   const apiKey = process.env.SMTP2GO_API_KEY;
   const from = process.env.ALERT_EMAIL_FROM;
   if (!apiKey || !from || !to) {
@@ -36,7 +37,12 @@ export async function sendEmail(app, { to, subject, text }) {
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': apiKey },
-      body: JSON.stringify({ api_key: apiKey, to: [to], sender: from, subject, text_body: text, html_body: renderHtml(subject, text) }),
+      body: JSON.stringify({
+        api_key: apiKey, to: [to], sender: from, subject, text_body: text, html_body: renderHtml(subject, text),
+        ...(attachments?.length && {
+          attachments: attachments.map((a) => ({ filename: a.filename, mimetype: a.mimetype, fileblob: a.buf.toString('base64') })),
+        }),
+      }),
     });
     if (!res.ok) {
       app.log.error({ status: res.status, body: await res.text().catch(() => '') }, 'smtp2go send failed');

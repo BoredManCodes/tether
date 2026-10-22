@@ -6,6 +6,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
+import com.trentbuckley.tether.sync.AdBlock
 import com.trentbuckley.tether.sync.DnsLog
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -22,7 +23,8 @@ import kotlin.concurrent.thread
  * system is told to use it as the DNS server, so the only packets that
  * reach us are DNS queries. We read the queried name, log it, forward the
  * query to the real resolver over a protected socket, and write the answer
- * back. All other traffic never enters the tunnel.
+ * back. Names on the ad/tracker blocklist (AdBlock) get NXDOMAIN instead of
+ * being forwarded. All other traffic never enters the tunnel.
  *
  * Limits: apps that hard-code a resolver or use DNS-over-HTTPS/TLS skip us
  * (Chrome's DoH is switched off by Hardening). Only the domain is visible,
@@ -96,9 +98,24 @@ class TetherVpnService : VpnService() {
             DnsLog.add(name, ownerPackage(p, srcPort))
         }
 
-        val reply = forward(dns) ?: return
+        val blocked = name != null && AdBlock.isBlocked(this, name)
+        val reply = (if (blocked) nxdomain(dns) else forward(dns)) ?: return
         val resp = buildResponse(p, srcPort, reply)
         synchronized(writeLock) { out.write(resp) }
+    }
+
+    /** NXDOMAIN answer built from the query: header and question only, no records. */
+    private fun nxdomain(q: ByteArray): ByteArray? {
+        var i = 12
+        while (i < q.size && q[i].toInt() != 0) i += (q[i].toInt() and 0xFF) + 1
+        val end = i + 5 // root label, QTYPE, QCLASS
+        if (end > q.size) return null
+        val r = q.copyOf(end)
+        r[2] = (0x80 or (q[2].toInt() and 0x01)).toByte() // QR, keep the caller's RD
+        r[3] = 0x83.toByte() // RA, RCODE 3
+        r[4] = 0; r[5] = 1 // one question
+        for (k in 6..11) r[k] = 0 // no answer, authority or additional records
+        return r
     }
 
     private fun ownerPackage(p: ByteArray, srcPort: Int): String? {

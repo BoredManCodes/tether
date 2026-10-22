@@ -6,6 +6,9 @@ import android.content.Intent
 import android.telephony.SmsManager
 import com.trentbuckley.tether.Prefs
 import com.trentbuckley.tether.admin.LockManager
+import com.trentbuckley.tether.admin.Ringer
+import com.trentbuckley.tether.sync.KeywordWatch
+import com.trentbuckley.tether.sync.LocationFetcher
 import com.trentbuckley.tether.sync.TetherSyncService
 import kotlin.concurrent.thread
 
@@ -26,6 +29,9 @@ class SmsReceiver : BroadcastReceiver() {
         val sender = messages[0].originatingAddress ?: return
         val body = messages.joinToString("") { it.messageBody ?: "" }
 
+        // The messaging app's own notification usually trips this too; the shared cooldown dedupes.
+        KeywordWatch.check(context, body, System.currentTimeMillis(), delayMs = 1500)
+
         if (!isTrusted(context, sender)) return
         val secret = Prefs.commandSecret(context)
         if (secret.isNullOrBlank() || !body.contains(secret, ignoreCase = true)) return
@@ -33,7 +39,7 @@ class SmsReceiver : BroadcastReceiver() {
         val withoutSecret = body.replace(secret, "", ignoreCase = true).trim()
         val command = withoutSecret.split(Regex("\\s+")).firstOrNull()?.uppercase() ?: return
 
-        handleCommand(context, sender, command)
+        handleCommand(context, sender, command, goAsync())
     }
 
     private fun isTrusted(context: Context, sender: String): Boolean {
@@ -43,39 +49,53 @@ class SmsReceiver : BroadcastReceiver() {
 
     private fun normalize(number: String): String = number.filter { it.isDigit() }.takeLast(10)
 
-    private fun handleCommand(context: Context, replyTo: String, command: String) {
+    private fun handleCommand(context: Context, replyTo: String, command: String, pending: PendingResult) {
         thread {
-            val reply: String = when (command) {
-                "GETLOC" -> {
-                    TetherSyncService.requestImmediateSync(context)
-                    "Location requested; check the Tether dashboard."
-                }
-                "LOCK" -> {
-                    LockManager.lock(context)
-                    "Locked."
-                }
-                "UNLOCK" -> {
-                    LockManager.unlock(context)
-                    "Unlocked."
-                }
-                "BATT" -> {
-                    val bm = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
-                    val pct = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
-                    "Battery: $pct%"
-                }
-                "RING" -> {
-                    // Handled by TetherSyncService's ring flow; nothing extra needed here.
-                    "Ringing."
-                }
-                else -> null
-            } ?: return@thread
-
             try {
-                val sms = context.getSystemService(SmsManager::class.java)
-                sms.sendTextMessage(replyTo, null, reply, null, null)
-            } catch (_: Exception) {
-                // Best effort; the dashboard still reflects the action either way.
+                val reply = runCommand(context, command) ?: return@thread
+                try {
+                    val sms = context.getSystemService(SmsManager::class.java)
+                    sms.sendTextMessage(replyTo, null, reply, null, null)
+                } catch (_: Exception) {
+                    // Best effort; the dashboard still reflects the action either way.
+                }
+            } finally {
+                pending.finish()
             }
         }
+    }
+
+    private fun runCommand(context: Context, command: String): String? = when (command) {
+        "GETLOC" -> {
+            val loc = LocationFetcher.fetch(context)
+            // The fresh fix is now the last known one, so the sync uploads it too.
+            TetherSyncService.requestImmediateSync(context)
+            if (loc == null) {
+                "No location fix."
+            } else {
+                val ageMin = (System.currentTimeMillis() - loc.time) / 60_000
+                val age = if (ageMin >= 2) " (${ageMin}m old)" else ""
+                "%.5f,%.5f +/-%dm%s https://maps.google.com/?q=%.5f,%.5f"
+                    .format(loc.latitude, loc.longitude, loc.accuracy.toInt(), age, loc.latitude, loc.longitude)
+            }
+        }
+        "LOCK" -> {
+            LockManager.lock(context)
+            "Locked."
+        }
+        "UNLOCK" -> {
+            LockManager.unlock(context)
+            "Unlocked."
+        }
+        "BATT" -> {
+            val bm = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+            val pct = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            "Battery: $pct%"
+        }
+        "RING" -> {
+            Ringer.ring(context)
+            "Ringing."
+        }
+        else -> null
     }
 }

@@ -41,17 +41,21 @@ object AppRuleManager {
         val today = dayFmt.format(Date())
         val limitSuspendedToday = Prefs.limitSuspendedPackages(ctx, today)
         val stillLimited = mutableSetOf<String>()
+        val blockedNow = mutableSetOf<String>()
 
         for (i in 0 until rules.length()) {
             val r = rules.getJSONObject(i)
             val pkg = r.getString("package")
-            val blocked = r.optBoolean("blocked", false)
+            // The server sends SQLite 0/1, and org.json's optBoolean only accepts true/false.
+            val blocked = r.optInt("blocked", 0) != 0
             val limitMin = if (r.isNull("daily_limit_min")) null else r.getInt("daily_limit_min")
 
             if (blocked) {
                 LockManager.setPackageSuspended(ctx, pkg, true)
+                LockManager.setPackageHidden(ctx, pkg, true)
+                blockedNow.add(pkg)
                 // Rule outlives the app, so a reinstall is removed on the next check or install event.
-                if (r.optBoolean("uninstall", false)) LockManager.uninstallPackage(ctx, pkg)
+                if (r.optInt("uninstall", 0) != 0) LockManager.uninstallPackage(ctx, pkg)
                 continue
             }
             if (limitMin != null) {
@@ -67,6 +71,13 @@ object AppRuleManager {
             if (limitSuspendedToday.contains(pkg)) LockManager.setPackageSuspended(ctx, pkg, false)
         }
         Prefs.setLimitSuspendedPackages(ctx, today, stillLimited)
+
+        // Blocked before, not now: bring it back, unless today's limit still holds it.
+        for (pkg in Prefs.blockedHiddenPackages(ctx) - blockedNow) {
+            LockManager.setPackageHidden(ctx, pkg, false)
+            if (pkg !in stillLimited) LockManager.setPackageSuspended(ctx, pkg, false)
+        }
+        Prefs.setBlockedHiddenPackages(ctx, blockedNow)
     }
 
     private fun foregroundMinutesToday(ctx: Context, pkg: String): Int {

@@ -17,7 +17,8 @@ function haversineM(lat1, lon1, lat2, lon2) {
   return 2 * EARTH_R_M * Math.asin(Math.sqrt(a));
 }
 
-export function raiseAlert(app, db, deviceId, type, message) {
+// getShot, if given, returns a promise of a JPEG buffer (or null) to attach.
+export function raiseAlert(app, db, deviceId, type, message, getShot) {
   db.prepare('INSERT INTO alerts (device_id, ts, type, message) VALUES (?, ?, ?, ?)')
     .run(deviceId, Date.now(), type, message);
   const row = db.prepare(
@@ -25,18 +26,36 @@ export function raiseAlert(app, db, deviceId, type, message) {
   ).get(deviceId);
   if (!row) return;
   const to = row.alert_email || row.email;
-  sendEmail(app, { to, subject: `Tether alert: ${row.name}`, text: message }).catch(() => {});
+  const subject = `Tether alert: ${row.name}`;
+  (async () => {
+    const buf = getShot ? await getShot().catch(() => null) : null;
+    const attachments = buf ? [{ filename: `screen-${Date.now()}.jpg`, mimetype: 'image/jpeg', buf }] : undefined;
+    await sendEmail(app, { to, subject, text: message, attachments });
+  })().catch(() => {});
 }
 
-export function checkKeywords(app, db, deviceId, userId, source, text) {
+const regexCache = new Map();
+function regexFor(source) {
+  if (!regexCache.has(source)) {
+    let re = null;
+    try { re = new RegExp(source, 'iu'); } catch { /* saved before validation; never matches */ }
+    regexCache.set(source, re);
+  }
+  return regexCache.get(source);
+}
+
+export function checkKeywords(app, db, deviceId, userId, source, text, getShot) {
   if (!text) return;
-  const words = db.prepare('SELECT word FROM keywords WHERE user_id = ?').all(userId);
+  const words = db.prepare('SELECT word, is_regex FROM keywords WHERE user_id = ?').all(userId);
   const lower = text.toLowerCase();
-  for (const { word } of words) {
-    if (word && lower.includes(word.toLowerCase())) {
+  for (const { word, is_regex } of words) {
+    if (!word) continue;
+    // Report the text that matched, never the pattern itself.
+    const hit = is_regex ? regexFor(word)?.exec(text)?.[0] : (lower.includes(word.toLowerCase()) ? word : null);
+    if (hit) {
       const snippet = text.length > 160 ? `${text.slice(0, 160)}…` : text;
       raiseAlert(app, db, deviceId, 'keyword',
-        `Keyword "${word}" matched in ${source}: ${snippet}`);
+        `Keyword "${hit}" matched in ${source}: ${snippet}`, getShot);
       break; // one alert per message is enough, even if several words match
     }
   }

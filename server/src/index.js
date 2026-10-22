@@ -15,6 +15,9 @@ import { sendEmail } from './email.js';
 import {
   raiseAlert, checkKeywords, checkGeofences, checkTamper, offlineWatchdog, clearOfflineAlert,
 } from './alerts.js';
+import {
+  startBlocklist, deviceBlockState, deviceBlocklist, makeClassifier, normalizeDomain, parseCats, CATEGORIES,
+} from './blocklist.js';
 
 const DATA_DIR = process.env.TETHER_DATA || path.resolve('data');
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
@@ -27,6 +30,7 @@ const COMMAND_TYPES = new Set([
 
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
 const db = openDb(DATA_DIR);
+startBlocklist(db);
 if (seedAdmin(db, process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD)) {
   console.log(`seeded admin ${process.env.ADMIN_EMAIL}; password change required at first login`);
 }
@@ -63,7 +67,27 @@ function wake(deviceId) {
   for (const fn of waiters.get(deviceId) || []) fn();
 }
 
-const APP_NAME_SQL = 'coalesce(n.app_name, ia.app_name, n.package)';
+// The phone grabs a screenshot the moment a keyword shows up (see KeywordWatch.kt)
+// and uploads it as media kind=screenshot stamped with the message time. The
+// message itself syncs later, so match the nearest screenshot within 30s. Retries
+// briefly in case the upload is still in flight. Resolves null if there is none.
+const SHOT_MATCH_MS = 30 * 1000;
+
+async function shotNear(deviceId, ts) {
+  const q = db.prepare(
+    `SELECT file FROM media WHERE device_id = ? AND kind = 'screenshot' AND ts BETWEEN ? AND ?
+     ORDER BY abs(ts - ?) LIMIT 1`);
+  for (let i = 0; i < 3; i++) {
+    const row = q.get(deviceId, ts - SHOT_MATCH_MS, ts + SHOT_MATCH_MS, ts);
+    if (row) {
+      try { return fs.readFileSync(path.join(MEDIA_DIR, row.file)); } catch { return null; }
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return null;
+}
+
+const APP_NAME_SQL ='coalesce(n.app_name, ia.app_name, n.package)';
 
 const own = (req, deviceId) =>
   db.prepare('SELECT * FROM devices WHERE id = ? AND user_id = ?').get(deviceId, req.user.id);
@@ -151,14 +175,20 @@ app.post('/api/devices/:id/alerts/:aid/read', auth, async (req, reply) => {
 
 // ---------- keywords (per account, applies to every device) ----------
 app.get('/api/keywords', auth, async (req) =>
-  db.prepare('SELECT id, word FROM keywords WHERE user_id = ? ORDER BY word').all(req.user.id));
+  db.prepare('SELECT id, word, is_regex FROM keywords WHERE user_id = ? ORDER BY is_regex DESC, word').all(req.user.id));
 
 app.post('/api/keywords', auth, async (req, reply) => {
-  const word = String(req.body?.word || '').trim().slice(0, 100);
+  const isRegex = req.body?.regex ? 1 : 0;
+  const word = String(req.body?.word || '').trim().slice(0, isRegex ? 200 : 100);
   if (!word) return reply.code(400).send({ error: 'word_required' });
+  if (isRegex) {
+    // Phone matches with java.util.regex, server with JS; flags mirror each other (case-insensitive, unicode).
+    try { if (new RegExp(word, 'iu').test('')) return reply.code(400).send({ error: 'regex_matches_empty' }); }
+    catch { return reply.code(400).send({ error: 'invalid_regex' }); }
+  }
   try {
-    const r = db.prepare('INSERT INTO keywords (user_id, word) VALUES (?, ?)').run(req.user.id, word);
-    return { id: r.lastInsertRowid, word };
+    const r = db.prepare('INSERT INTO keywords (user_id, word, is_regex) VALUES (?, ?, ?)').run(req.user.id, word, isRegex);
+    return { id: r.lastInsertRowid, word, is_regex: isRegex };
   } catch {
     return reply.code(409).send({ error: 'already_exists' });
   }
@@ -209,10 +239,54 @@ app.get('/api/devices/:id/sites', auth, async (req, reply) => {
   if (!own(req, req.params.id)) return reply.code(404).send({ error: 'not_found' });
   const limit = Math.min(Number(req.query.limit) || 300, 1000);
   const since = Number(req.query.since) || Date.now() - 24 * 60 * 60 * 1000;
-  return db.prepare(
+  const rows = db.prepare(
     `SELECT domain, count(*) AS hits, max(ts) AS last_ts, max(app_name) AS app_name, max(package) AS package
      FROM dns_log WHERE device_id = ? AND ts >= ? GROUP BY domain ORDER BY last_ts DESC LIMIT ?`
   ).all(req.params.id, since, limit);
+  const classify = makeClassifier(db, deviceBlockState(db, req.params.id));
+  return rows.map((r) => ({ ...r, ...classify(r.domain) }));
+});
+
+// ---------- DNS blocking: category switches and custom domains (see AdBlock.kt) ----------
+const blockSettings = (id) => {
+  const s = deviceBlockState(db, id);
+  const counts = new Map(db.prepare('SELECT cat, count FROM block_meta').all().map((m) => [m.cat, m.count]));
+  return {
+    enabled: s.enabled,
+    cats: s.cats,
+    custom: s.custom,
+    categories: Object.entries(CATEGORIES).map(([key, c]) => ({ key, label: c.label, count: counts.get(key) ?? null })),
+  };
+};
+
+app.get('/api/devices/:id/adblock', auth, async (req, reply) => {
+  const d = own(req, req.params.id);
+  if (!d) return reply.code(404).send({ error: 'not_found' });
+  return blockSettings(d.id);
+});
+
+app.put('/api/devices/:id/adblock', auth, async (req, reply) => {
+  const d = own(req, req.params.id);
+  if (!d) return reply.code(404).send({ error: 'not_found' });
+  if (req.body?.enabled !== undefined) db.prepare('UPDATE devices SET adblock = ? WHERE id = ?').run(req.body.enabled ? 1 : 0, d.id);
+  if (Array.isArray(req.body?.cats)) db.prepare('UPDATE devices SET block_cats = ? WHERE id = ?').run(parseCats(req.body.cats.join(',')).join(','), d.id);
+  return blockSettings(d.id);
+});
+
+app.post('/api/devices/:id/blocked-domains', auth, async (req, reply) => {
+  const d = own(req, req.params.id);
+  if (!d) return reply.code(404).send({ error: 'not_found' });
+  const domain = normalizeDomain(req.body?.domain);
+  if (!domain) return reply.code(400).send({ error: 'invalid_domain' });
+  db.prepare('INSERT OR IGNORE INTO custom_blocks (device_id, domain) VALUES (?, ?)').run(d.id, domain);
+  return { domain };
+});
+
+app.delete('/api/devices/:id/blocked-domains/:domain', auth, async (req, reply) => {
+  const d = own(req, req.params.id);
+  if (!d) return reply.code(404).send({ error: 'not_found' });
+  db.prepare('DELETE FROM custom_blocks WHERE device_id = ? AND domain = ?').run(d.id, req.params.domain.toLowerCase());
+  return { ok: true };
 });
 
 app.put('/api/devices/:id/apprules', auth, async (req, reply) => {
@@ -421,14 +495,38 @@ app.post('/api/device/sync', dev, async (req) => {
     });
   }
   for (const l of b.locations || []) checkGeofences(app, db, id, l.lat, l.lon);
-  for (const s of b.sms || []) checkKeywords(app, db, id, req.device.user_id, `SMS from ${s.contact || s.address || 'unknown'}`, s.body);
-  for (const n of b.notifications || []) checkKeywords(app, db, id, req.device.user_id, `notification (${n.app_name || n.package || 'app'})`, `${n.title || ''} ${n.text || ''}`.trim());
+  for (const s of b.sms || []) checkKeywords(app, db, id, req.device.user_id, `SMS from ${s.contact || s.address || 'unknown'}`, s.body, () => shotNear(id, s.ts));
+  for (const n of b.notifications || []) checkKeywords(app, db, id, req.device.user_id, `notification (${n.app_name || n.package || 'app'})`, `${n.title || ''} ${n.text || ''}`.trim(), () => shotNear(id, n.ts));
 
   return { ok: true };
 });
 
 app.get('/api/device/schedule', dev, async (req) =>
   db.prepare('SELECT days, start_min, end_min FROM schedules WHERE device_id = ?').all(req.device.id));
+
+app.get('/api/device/keywords', dev, async (req) =>
+  db.prepare('SELECT word, is_regex AS regex FROM keywords WHERE user_id = ?').all(req.device.user_id)
+    .map((k) => ({ word: k.word, regex: !!k.regex })));
+
+// DNS ad block: per-device switch, plus the shared domain list (see AdBlock.kt).
+app.get('/api/device/adblock', dev, async (req) =>
+  ({ version: deviceBlockState(db, req.device.id).version }));
+
+app.get('/api/device/blocklist', dev, async (req, reply) => {
+  const state = deviceBlockState(db, req.device.id);
+  return reply.header('X-Blocklist-Version', state.version).type('text/plain').send(deviceBlocklist(db, state));
+});
+
+// A keyword the phone saw on screen or typed (see KeywordWatch.checkScreen).
+app.post('/api/device/screen-hit', dev, async (req) => {
+  const b = req.body || {};
+  const cut = (v, n) => String(v ?? '').slice(0, n);
+  const ts = Number(b.ts) || Date.now();
+  raiseAlert(app, db, req.device.id, 'keyword',
+    `Keyword "${cut(b.words, 300)}" on screen in ${cut(b.app_name || b.package, 100)}: ${cut(b.snippet, 400)}`,
+    () => shotNear(req.device.id, ts));
+  return { ok: true };
+});
 
 app.get('/api/device/apprules', dev, async (req) =>
   db.prepare('SELECT package, blocked, uninstall, daily_limit_min FROM app_rules WHERE device_id = ?').all(req.device.id));

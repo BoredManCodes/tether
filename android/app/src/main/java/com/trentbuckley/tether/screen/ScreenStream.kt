@@ -7,6 +7,7 @@ import android.graphics.ColorSpace
 import android.os.Handler
 import android.os.Looper
 import com.trentbuckley.tether.net.Api
+import com.trentbuckley.tether.sync.MediaUploader
 import java.io.ByteArrayOutputStream
 import kotlin.concurrent.thread
 
@@ -46,7 +47,12 @@ object ScreenStream {
         handler.postDelayed({ tick(ctx) }, INTERVAL_MS)
     }
 
-    private fun captureAndSend(ctx: Context) {
+    /** One frame saved to the media library (not the live view), stamped with [tsMs]. */
+    fun captureToMedia(ctx: Context, tsMs: Long) {
+        captureAndSend(ctx) { jpeg -> MediaUploader.upload(ctx, jpeg, "screenshot", tsMs) }
+    }
+
+    private fun captureAndSend(ctx: Context, sink: (ByteArray) -> Unit = { Api.postBinary(ctx, "/api/device/screen", "image/jpeg", it) }) {
         val service = TetherAccessibilityService.instance ?: return
         service.takeScreenshot(
             android.view.Display.DEFAULT_DISPLAY,
@@ -57,7 +63,7 @@ object ScreenStream {
                         try {
                             val bitmap = toBitmap(result) ?: return@thread
                             val jpeg = toJpeg(bitmap)
-                            Api.postBinary(ctx, "/api/device/screen", "image/jpeg", jpeg)
+                            sink(jpeg)
                         } catch (_: Exception) {
                             // Dropped frame; the next tick will try again.
                         }

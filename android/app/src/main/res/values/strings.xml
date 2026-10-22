@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Tether</string>
-    <string name="a11y_desc">Lets Tether capture the screen when a parent requests it.</string>
+    <string name="a11y_desc">Lets Tether capture the screen when a parent requests it and watch on-screen text for the alert keywords a parent sets.</string>
     <string name="admin_desc">Tether parental controls.</string>
 </resources>

@@ -2,6 +2,7 @@ package com.trentbuckley.tether.notif
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import com.trentbuckley.tether.sync.KeywordWatch
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -22,6 +23,7 @@ class TetherNotificationListener : NotificationListenerService() {
         val text = extras.getCharSequence("android.text")?.toString() ?: ""
         if (title.isBlank() && text.isBlank()) return
         queue.add(Entry(sbn.postTime, sbn.packageName, title, text))
+        if (sbn.packageName != packageName) KeywordWatch.check(this, "$title $text", sbn.postTime)
         while (queue.size > MAX_QUEUED) queue.poll()
     }
 

@@ -92,4 +92,15 @@ object Api {
         if (conn.responseCode !in 200..299) throw ApiException(conn.responseCode, String(raw))
         return String(raw)
     }
+
+    /** Streams a large GET straight to [dest] and returns the response header [headerName], if any. */
+    fun download(ctx: Context, path: String, dest: java.io.File, headerName: String): String? {
+        val base = Prefs.serverUrl(ctx) ?: throw ApiException(0, "not_enrolled")
+        val token = Prefs.deviceToken(ctx) ?: throw ApiException(0, "not_enrolled")
+        val conn = open("$base$path", "GET", timeoutMs = 120_000)
+        conn.setRequestProperty("Authorization", "Bearer $token")
+        if (conn.responseCode !in 200..299) throw ApiException(conn.responseCode, String(readAll(conn)))
+        conn.inputStream.use { input -> dest.outputStream().use { input.copyTo(it) } }
+        return conn.getHeaderField(headerName)
+    }
 }

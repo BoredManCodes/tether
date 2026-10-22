@@ -159,10 +159,30 @@ export function openDb(dataDir) {
   if (!columns('app_rules').includes('uninstall')) db.exec('ALTER TABLE app_rules ADD COLUMN uninstall INTEGER NOT NULL DEFAULT 0');
   if (!columns('users').includes('mfa_enabled')) db.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0');
   if (!columns('users').includes('alert_email')) db.exec('ALTER TABLE users ADD COLUMN alert_email TEXT');
+  if (!columns('keywords').includes('is_regex')) db.exec('ALTER TABLE keywords ADD COLUMN is_regex INTEGER NOT NULL DEFAULT 0');
   if (!columns('devices').includes('admin_active')) db.exec('ALTER TABLE devices ADD COLUMN admin_active INTEGER');
   if (!columns('devices').includes('accessibility_active')) db.exec('ALTER TABLE devices ADD COLUMN accessibility_active INTEGER');
   if (!columns('devices').includes('notif_listener_active')) db.exec('ALTER TABLE devices ADD COLUMN notif_listener_active INTEGER');
   if (!columns('devices').includes('offline_alerted_at')) db.exec('ALTER TABLE devices ADD COLUMN offline_alerted_at INTEGER');
+  if (!columns('devices').includes('adblock')) db.exec('ALTER TABLE devices ADD COLUMN adblock INTEGER NOT NULL DEFAULT 1');
+  if (!columns('devices').includes('block_cats')) db.exec("ALTER TABLE devices ADD COLUMN block_cats TEXT NOT NULL DEFAULT 'ads,tracking,scams'");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS block_domains (
+      domain TEXT NOT NULL,
+      cat TEXT NOT NULL,
+      PRIMARY KEY (domain, cat)
+    ) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS block_meta (
+      cat TEXT PRIMARY KEY,
+      updated INTEGER NOT NULL,
+      count INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS custom_blocks (
+      device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      domain TEXT NOT NULL,
+      PRIMARY KEY (device_id, domain)
+    ) WITHOUT ROWID;
+  `);
   for (const [col, type] of [['cell_type', 'TEXT'], ['cell_level', 'INTEGER'], ['cell_dbm', 'INTEGER'],
     ['wifi_connected', 'INTEGER'], ['wifi_ssid', 'TEXT'], ['wifi_level', 'INTEGER'], ['wifi_rssi', 'INTEGER']]) {
     if (!columns('devices').includes(col)) db.exec(`ALTER TABLE devices ADD COLUMN ${col} ${type}`);
