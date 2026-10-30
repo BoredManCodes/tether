@@ -130,6 +130,18 @@ app.post('/api/auth/change-password', { preHandler: app.requireUser }, async (re
   return { token: createSession(db, u.id) };
 });
 
+// Public on purpose: the login screen links here. Drop the build at <data dir>/tether.apk.
+const APK_PATH = path.join(DATA_DIR, 'tether.apk');
+app.get('/download/tether.apk', async (_req, reply) => {
+  let st;
+  try { st = fs.statSync(APK_PATH); } catch { return reply.code(404).send({ error: 'no_apk' }); }
+  return reply
+    .header('Content-Type', 'application/vnd.android.package-archive')
+    .header('Content-Disposition', 'attachment; filename="tether.apk"')
+    .header('Content-Length', st.size)
+    .send(fs.createReadStream(APK_PATH));
+});
+
 app.get('/api/auth/me', { preHandler: app.requireUser }, async (req) => {
   const u = db.prepare('SELECT mfa_enabled, alert_email FROM users WHERE id = ?').get(req.user.id);
   return { ...req.user, mfa_enabled: !!u.mfa_enabled, alert_email: u.alert_email };

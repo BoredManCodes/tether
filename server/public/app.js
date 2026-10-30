@@ -113,7 +113,15 @@ function showLogin(msg) {
     field({ name: 'email', type: 'email', placeholder: 'Email', autocomplete: 'username', required: true }),
     field({ name: 'password', type: 'password', placeholder: 'Password', autocomplete: 'current-password', required: true }),
     h('button', { class: 'btn btn-primary w-100' }, 'Sign in'),
-    errBox(msg));
+    errBox(msg),
+    apkLink());
+}
+
+// Only shown when the server has an APK to give out.
+function apkLink() {
+  const a = h('a', { class: 'btn btn-outline-secondary w-100 mt-3 d-none', href: '/download/tether.apk', download: 'tether.apk' }, 'Download Android app (APK)');
+  fetch('/download/tether.apk', { method: 'HEAD' }).then((r) => { if (r.ok) a.classList.remove('d-none'); }).catch(() => {});
+  return a;
 }
 
 async function onLogin(ev) {
