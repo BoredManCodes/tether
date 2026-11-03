@@ -21,16 +21,20 @@ function haversineM(lat1, lon1, lat2, lon2) {
 export function raiseAlert(app, db, deviceId, type, message, getShot) {
   db.prepare('INSERT INTO alerts (device_id, ts, type, message) VALUES (?, ?, ?, ?)')
     .run(deviceId, Date.now(), type, message);
-  const row = db.prepare(
-    `SELECT u.email, u.alert_email, d.name FROM devices d JOIN users u ON u.id = d.user_id WHERE d.id = ?`
-  ).get(deviceId);
-  if (!row) return;
-  const to = row.alert_email || row.email;
-  const subject = `Tether alert: ${row.name}`;
+  const dev = db.prepare('SELECT name FROM devices WHERE id = ?').get(deviceId);
+  if (!dev) return;
+  // Every portal user is a parent; all of them get the alert.
+  const recipients = [...new Set(
+    db.prepare('SELECT email, alert_email FROM users').all().map((u) => u.alert_email || u.email)
+  )];
+  if (!recipients.length) return;
+  const subject = `Tether alert: ${dev.name}`;
   (async () => {
     const buf = getShot ? await getShot().catch(() => null) : null;
     const attachments = buf ? [{ filename: `screen-${Date.now()}.jpg`, mimetype: 'image/jpeg', buf }] : undefined;
-    await sendEmail(app, { to, subject, text: message, attachments });
+    for (const to of recipients) {
+      await sendEmail(app, { to, subject, text: message, attachments }).catch(() => {});
+    }
   })().catch(() => {});
 }
 
@@ -46,7 +50,7 @@ function regexFor(source) {
 
 export function checkKeywords(app, db, deviceId, userId, source, text, getShot) {
   if (!text) return;
-  const words = db.prepare('SELECT word, is_regex FROM keywords WHERE user_id = ?').all(userId);
+  const words = db.prepare('SELECT word, is_regex FROM keywords').all();
   const lower = text.toLowerCase();
   for (const { word, is_regex } of words) {
     if (!word) continue;

@@ -89,8 +89,9 @@ async function shotNear(deviceId, ts) {
 
 const APP_NAME_SQL ='coalesce(n.app_name, ia.app_name, n.package)';
 
+// Every portal user is a parent and sees every device. user_id only records who enrolled it.
 const own = (req, deviceId) =>
-  db.prepare('SELECT * FROM devices WHERE id = ? AND user_id = ?').get(deviceId, req.user.id);
+  db.prepare('SELECT * FROM devices WHERE id = ?').get(deviceId);
 
 // ---------- parent auth ----------
 app.post('/api/auth/login', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
@@ -187,7 +188,7 @@ app.post('/api/devices/:id/alerts/:aid/read', auth, async (req, reply) => {
 
 // ---------- keywords (per account, applies to every device) ----------
 app.get('/api/keywords', auth, async (req) =>
-  db.prepare('SELECT id, word, is_regex FROM keywords WHERE user_id = ? ORDER BY is_regex DESC, word').all(req.user.id));
+  db.prepare('SELECT id, word, is_regex FROM keywords ORDER BY is_regex DESC, word').all());
 
 app.post('/api/keywords', auth, async (req, reply) => {
   const isRegex = req.body?.regex ? 1 : 0;
@@ -207,7 +208,7 @@ app.post('/api/keywords', auth, async (req, reply) => {
 });
 
 app.delete('/api/keywords/:kid', auth, async (req) => {
-  db.prepare('DELETE FROM keywords WHERE id = ? AND user_id = ?').run(req.params.kid, req.user.id);
+  db.prepare('DELETE FROM keywords WHERE id = ?').run(req.params.kid);
   return { ok: true };
 });
 
@@ -376,7 +377,7 @@ app.get('/api/devices/:id/search', auth, async (req, reply) => {
 app.get('/api/devices', auth, async (req) =>
   db.prepare(`SELECT id, name, battery_pct, charging, locked, last_seen,
     cell_type, cell_level, cell_dbm, wifi_connected, wifi_ssid, wifi_level, wifi_rssi
-    FROM devices WHERE user_id = ?`).all(req.user.id));
+    FROM devices`).all());
 
 function listRoute(table, cols, orderCol = 'ts') {
   app.get(`/api/devices/:id/${table}`, auth, async (req, reply) => {
@@ -413,8 +414,7 @@ app.get('/api/devices/:id/usage', auth, async (req, reply) => {
 });
 
 app.get('/api/media/:mid', auth, async (req, reply) => {
-  const m = db.prepare(`SELECT m.* FROM media m JOIN devices d ON d.id = m.device_id WHERE m.id = ? AND d.user_id = ?`)
-    .get(req.params.mid, req.user.id);
+  const m = db.prepare('SELECT * FROM media WHERE id = ?').get(req.params.mid);
   if (!m) return reply.code(404).send({ error: 'not_found' });
   return reply.type('image/jpeg').send(fs.createReadStream(path.join(MEDIA_DIR, m.file)));
 });
@@ -548,7 +548,7 @@ app.get('/api/device/schedule', dev, async (req) =>
   db.prepare('SELECT days, start_min, end_min FROM schedules WHERE device_id = ?').all(req.device.id));
 
 app.get('/api/device/keywords', dev, async (req) =>
-  db.prepare('SELECT word, is_regex AS regex FROM keywords WHERE user_id = ?').all(req.device.user_id)
+  db.prepare('SELECT word, is_regex AS regex FROM keywords').all()
     .map((k) => ({ word: k.word, regex: !!k.regex })));
 
 // DNS ad block: per-device switch, plus the shared domain list (see AdBlock.kt).
