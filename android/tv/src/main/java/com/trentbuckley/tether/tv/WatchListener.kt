@@ -34,18 +34,26 @@ class WatchListener : NotificationListenerService() {
         super.onListenerConnected()
         blocked = Store.blocked(this)
         msm = getSystemService(MEDIA_SESSION_SERVICE) as MediaSessionManager
-        val me = ComponentName(this, WatchListener::class.java)
-        try {
-            msm.addOnActiveSessionsChangedListener(sessionsChanged, me, handler)
-            attach(msm.getActiveSessions(me))
-        } catch (e: SecurityException) {
-            Log.w(TAG, "no session access", e)
-        }
+        connectSessions()
         handler.post(refreshLoop)
         startCommandPoll()
     }
 
     @Volatile private var polling = false
+
+    // After a reinstall Android sometimes refuses media access for a moment; retry until it sticks.
+    private fun connectSessions() {
+        val me = ComponentName(this, WatchListener::class.java)
+        try {
+            msm.addOnActiveSessionsChangedListener(sessionsChanged, me, handler)
+            attach(msm.getActiveSessions(me))
+            mediaOk = true
+        } catch (e: SecurityException) {
+            mediaOk = false
+            Log.w(TAG, "no session access, retrying", e)
+            handler.postDelayed({ connectSessions() }, 10_000L)
+        }
+    }
 
     private fun startCommandPoll() {
         if (polling) return
@@ -73,6 +81,7 @@ class WatchListener : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        mediaOk = false
         polling = false
         BackService.stopStream()
         handler.removeCallbacksAndMessages(null)
@@ -215,6 +224,8 @@ class WatchListener : NotificationListenerService() {
     }
 
     companion object {
+        /** True once the listener has working access to media sessions. */
+        @Volatile var mediaOk = false
         private const val TAG = "TetherTv"
         private const val SETTLE_MS = 1_200L
         private const val RETRY_MS = 1_500L

@@ -1,6 +1,9 @@
 package com.trentbuckley.tether.tv
 
 import android.app.Activity
+import android.content.ComponentName
+import android.content.Intent
+import android.service.notification.NotificationListenerService
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -38,7 +41,14 @@ class SetupActivity : Activity() {
         name = EditText(this).apply { hint = "Device name"; setText("Living room TV") }
         status = TextView(this).apply { textSize = 18f }
         val go = Button(this).apply { text = "Enroll"; setOnClickListener { enroll(url.text.toString(), email.text.toString(), password.text.toString(), name.text.toString()) } }
-        for (v in listOf(url, email, password, name, go, status)) root.addView(v)
+        val fix = Button(this).apply {
+            text = "Fix watch reader"
+            setOnClickListener {
+                try { NotificationListenerService.requestRebind(ComponentName(this@SetupActivity, WatchListener::class.java)) } catch (_: Exception) {}
+                try { startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) } catch (_: Exception) {}
+            }
+        }
+        for (v in listOf(url, email, password, name, go, fix, status)) root.addView(v)
         setContentView(root)
 
         intent?.let {
@@ -61,7 +71,13 @@ class SetupActivity : Activity() {
             if (extra.isNotEmpty()) appendLine(extra)
             appendLine("Enrolled: ${Store.isEnrolled(this@SetupActivity)}")
             appendLine("Watch reader on: $listenerOn")
+            appendLine("Media access: " + when {
+                !listenerOn -> "OFF, enable the watch reader"
+                WatchListener.mediaOk -> "OK"
+                else -> "BROKEN, press Fix watch reader (blocking and logging are not working)"
+            })
             appendLine("Back presser on: $a11yOn")
+            appendLine("Back presser running: ${BackService.instance != null}")
             appendLine("Blocked channels: ${Store.blocked(this@SetupActivity).joinToString().ifEmpty { "none" }}")
             val meta = Store.lastMeta(this@SetupActivity)
             if (meta.isNotEmpty()) appendLine("Last media metadata:\n$meta")
