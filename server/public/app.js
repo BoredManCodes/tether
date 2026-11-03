@@ -223,6 +223,25 @@ async function sendCommand(type, args) {
   await api(`/api/devices/${deviceId}/commands`, { method: 'POST', body: { type, args } });
 }
 
+// Live screen card for devices whose Overview tab is hidden (TVs).
+function liveScreenCard() {
+  const frame = h('img', { id: 'screen', alt: 'Live screen', hidden: true, class: 'mt-3', style: 'max-width:100%' });
+  let live = false;
+  const btn = h('button', { class: 'btn', onclick: async () => {
+    live = !live;
+    btn.textContent = live ? 'Stop live screen' : 'Live screen';
+    try { await sendCommand(live ? 'SCREEN_START' : 'SCREEN_STOP'); } catch (e) { btn.textContent = e.message; live = false; }
+    frame.hidden = !live;
+  } }, 'Live screen');
+  timers.push(setInterval(async () => {
+    if (!live) return;
+    const blob = await api(`/api/devices/${deviceId}/screen`, { blob: true }).catch(() => null);
+    if (blob) { const old = frame.src; frame.src = URL.createObjectURL(blob); if (old.startsWith('blob:')) URL.revokeObjectURL(old); }
+  }, 1000));
+  return h('div', { class: 'card card-body mb-3' }, h('div', { class: rowFlex }, btn,
+    h('span', { class: 'text-secondary' }, 'Copy-protected video (Netflix, Disney+) shows black.')), frame);
+}
+
 const VIEWS = {
   async overview(body, d) {
     const [locs] = await Promise.all([api(`/api/devices/${deviceId}/locations?limit=50`)]);
@@ -539,7 +558,7 @@ const VIEWS = {
       catch (e) { status.textContent = e.message === 'invalid_channel' ? 'Enter a channel name.' : e.message; }
     };
     chanInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
-    body.append(formCard(
+    body.append(liveScreenCard(), formCard(
       h('b', {}, 'Block a channel'),
       h('p', { class: 'text-secondary mt-2' }, 'When a video from a blocked channel starts, the TV presses Back. Names match exactly, ignoring case.'),
       h('div', { class: rowFlex }, chanInput, h('button', { class: 'btn btn-primary', onclick: doAdd }, 'Block'), status),

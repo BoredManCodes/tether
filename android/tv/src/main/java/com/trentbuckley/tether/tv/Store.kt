@@ -111,4 +111,29 @@ object Store {
         val raw = read(c)
         if (c.responseCode !in 200..299) throw ApiException(c.responseCode, raw)
     }
+
+    /** Long-poll for commands from the portal; blocks up to ~30 s. */
+    fun getCommands(ctx: Context): JSONArray {
+        val c = authed(ctx, "/api/device/commands", "GET")
+        c.readTimeout = 40_000
+        val raw = read(c)
+        if (c.responseCode !in 200..299) throw ApiException(c.responseCode, raw)
+        return JSONArray(raw.ifBlank { "[]" })
+    }
+
+    fun commandDone(ctx: Context, id: Long, ok: Boolean) {
+        val c = authed(ctx, "/api/device/commands/$id/done", "POST")
+        c.setRequestProperty("Content-Type", "application/json")
+        c.doOutput = true
+        c.outputStream.use { it.write(JSONObject().put("ok", ok).toString().toByteArray()) }
+        read(c)
+    }
+
+    fun postScreen(ctx: Context, jpeg: ByteArray) {
+        val c = authed(ctx, "/api/device/screen", "POST")
+        c.setRequestProperty("Content-Type", "image/jpeg")
+        c.doOutput = true
+        c.outputStream.use { it.write(jpeg) }
+        read(c)
+    }
 }

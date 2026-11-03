@@ -1,7 +1,12 @@
 package com.trentbuckley.tether.tv
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Bitmap
+import android.graphics.ColorSpace
 import android.graphics.Color
+import android.os.Build
+import java.io.ByteArrayOutputStream
+import kotlin.concurrent.thread
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
@@ -165,6 +170,47 @@ class BackService : AccessibilityService() {
         private const val ASK_MS = 20_000L
 
         @Volatile var instance: BackService? = null
+        @Volatile private var streaming = false
+
+        /** Live view: one frame a second until [stopStream]. Needs API 30. */
+        fun startStream(ctx: android.content.Context) {
+            if (streaming) return
+            streaming = true
+            val loop = object : Runnable {
+                override fun run() {
+                    if (!streaming) return
+                    grab(ctx)
+                    instance?.main?.postDelayed(this, 1_000L)
+                }
+            }
+            instance?.main?.post(loop)
+        }
+
+        fun stopStream() { streaming = false }
+
+        fun grab(ctx: android.content.Context): Boolean {
+            val s = instance ?: return false
+            if (Build.VERSION.SDK_INT < 30) return false
+            s.takeScreenshot(android.view.Display.DEFAULT_DISPLAY, { it.run() },
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(result: ScreenshotResult) {
+                        thread {
+                            try {
+                                val bmp = try {
+                                    Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB))
+                                        ?.copy(Bitmap.Config.ARGB_8888, false)
+                                } finally { result.hardwareBuffer.close() } ?: return@thread
+                                val scaled = Bitmap.createScaledBitmap(bmp, bmp.width / 2, bmp.height / 2, true)
+                                val out = ByteArrayOutputStream()
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 55, out)
+                                Store.postScreen(ctx, out.toByteArray())
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    override fun onFailure(errorCode: Int) {}
+                })
+            return true
+        }
 
         /** Returns false when the service is not running. */
         fun back(): Boolean = instance?.performGlobalAction(GLOBAL_ACTION_BACK) ?: false

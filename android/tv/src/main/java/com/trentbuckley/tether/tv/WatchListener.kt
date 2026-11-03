@@ -42,9 +42,39 @@ class WatchListener : NotificationListenerService() {
             Log.w(TAG, "no session access", e)
         }
         handler.post(refreshLoop)
+        startCommandPoll()
+    }
+
+    @Volatile private var polling = false
+
+    private fun startCommandPoll() {
+        if (polling) return
+        polling = true
+        Thread {
+            while (polling) {
+                try {
+                    if (!Store.isEnrolled(this)) { Thread.sleep(5_000); continue }
+                    val items = Store.getCommands(this)
+                    for (i in 0 until items.length()) {
+                        val cmd = items.getJSONObject(i)
+                        val ok = when (cmd.getString("type")) {
+                            "SCREEN_START" -> { BackService.startStream(applicationContext); true }
+                            "SCREEN_STOP" -> { BackService.stopStream(); true }
+                            "SCREENSHOT" -> BackService.grab(applicationContext)
+                            else -> false
+                        }
+                        try { Store.commandDone(this, cmd.getLong("id"), ok) } catch (_: Exception) {}
+                    }
+                } catch (_: Exception) {
+                    try { Thread.sleep(5_000) } catch (_: InterruptedException) {}
+                }
+            }
+        }.apply { isDaemon = true; start() }
     }
 
     override fun onListenerDisconnected() {
+        polling = false
+        BackService.stopStream()
         handler.removeCallbacksAndMessages(null)
         try { msm.removeOnActiveSessionsChangedListener(sessionsChanged) } catch (_: Exception) {}
         detachAll()
