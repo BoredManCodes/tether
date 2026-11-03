@@ -180,7 +180,7 @@ async function onChange(ev) {
 // ---------- shell ----------
 const TABS = [['overview', 'Overview'], ['alerts', 'Alerts'], ['messages', 'Messages'], ['calls', 'Calls'], ['notifications', 'Notifications'],
   ['search', 'Search'], ['usage', 'Screen time'], ['photos', 'Photos'], ['schedule', 'Schedule'],
-  ['apprules', 'Apps'], ['sites', 'Sites'], ['geofences', 'Places'], ['settings', 'Settings']];
+  ['apprules', 'Apps'], ['sites', 'Sites'], ['watch', 'TV'], ['geofences', 'Places'], ['settings', 'Settings']];
 
 async function start() {
   try { devices = await api('/api/devices'); } catch { return; }
@@ -496,6 +496,52 @@ const VIEWS = {
     body.append(h('p', { class: 'text-secondary' }, 'Domains the phone looked up in the last 24 hours, from the Tether VPN. Shows the site, not the page. Lookups from apps with their own DNS or encrypted DNS do not appear.'), siteList);
     renderCustom();
     renderSites();
+  },
+
+  async watch(body) {
+    const [rows, blockedList] = await Promise.all([
+      api(`/api/devices/${deviceId}/watch`),
+      api(`/api/devices/${deviceId}/blocked-channels`),
+    ]);
+    let blocked = blockedList;
+    const key = (c) => String(c || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const isBlocked = (c) => blocked.includes(key(c));
+    const chanList = h('div', { class: 'd-flex flex-column gap-2 mt-3' });
+    const history = h('div');
+    const status = h('span', { class: 'text-secondary' });
+    const addChannel = async (raw) => {
+      const r = await api(`/api/devices/${deviceId}/blocked-channels`, { method: 'POST', body: { channel: raw } });
+      if (!blocked.includes(r.channel)) blocked = [...blocked, r.channel].sort();
+      renderChans(); renderHistory();
+      return r.channel;
+    };
+    const renderChans = () => chanList.replaceChildren(...blocked.map((c) => h('div', { class: rowFlex }, h('b', {}, c),
+      h('button', { class: 'btn btn-sm ms-auto', onclick: async () => {
+        await api(`/api/devices/${deviceId}/blocked-channels/${encodeURIComponent(c)}`, { method: 'DELETE' });
+        blocked = blocked.filter((x) => x !== c); renderChans(); renderHistory();
+      } }, 'Unblock'))));
+    const renderHistory = () => history.replaceChildren(listCard(rows.map((r) => listItem('', h('div', { class: rowFlex },
+      h('b', {}, r.title),
+      r.channel ? badge(r.channel, 'bg-blue-lt') : null,
+      r.blocked ? badge('Blocked', 'bg-red-lt') : null,
+      r.channel && !isBlocked(r.channel) ? h('button', { class: 'btn btn-sm', onclick: async (e) => {
+        try { await addChannel(r.channel); } catch (err) { e.target.textContent = err.message; }
+      } }, 'Block channel') : null,
+      h('span', { class: 'text-secondary ms-auto' }, fmtTime(r.ts))))), 'Nothing watched yet.'));
+    const chanInput = input({ placeholder: 'Channel name, as SmartTube shows it', class: 'w-auto', style: 'min-width:260px' });
+    const doAdd = async () => {
+      try { const c = await addChannel(chanInput.value); chanInput.value = ''; status.textContent = `Blocked ${c}. The TV picks it up within a minute.`; }
+      catch (e) { status.textContent = e.message === 'invalid_channel' ? 'Enter a channel name.' : e.message; }
+    };
+    chanInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+    body.append(formCard(
+      h('b', {}, 'Block a channel'),
+      h('p', { class: 'text-secondary mt-2' }, 'When a video from a blocked channel starts, the TV presses Back. Names match exactly, ignoring case.'),
+      h('div', { class: rowFlex }, chanInput, h('button', { class: 'btn btn-primary', onclick: doAdd }, 'Block'), status),
+      chanList),
+      history);
+    renderChans();
+    renderHistory();
   },
 
   async geofences(body) {

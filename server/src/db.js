@@ -177,6 +177,22 @@ export function openDb(dataDir) {
       updated INTEGER NOT NULL,
       count INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS watch_log (
+      id INTEGER PRIMARY KEY,
+      device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      ts INTEGER NOT NULL,
+      last_ts INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      channel TEXT,
+      app_name TEXT,
+      blocked INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_watch ON watch_log (device_id, ts);
+    CREATE TABLE IF NOT EXISTS blocked_channels (
+      device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      channel TEXT NOT NULL,
+      PRIMARY KEY (device_id, channel)
+    ) WITHOUT ROWID;
     CREATE TABLE IF NOT EXISTS custom_blocks (
       device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
       domain TEXT NOT NULL,

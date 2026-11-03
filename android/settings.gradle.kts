@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "tether"
-include(":app")
+include(":app", ":tv")

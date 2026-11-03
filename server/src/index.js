@@ -322,6 +322,37 @@ app.put('/api/devices/:id/apprules', auth, async (req, reply) => {
   return { ok: true };
 });
 
+// ---------- TV watch history and channel blocks (see the tv module) ----------
+const chanKey = (v) => String(v ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 200);
+
+app.get('/api/devices/:id/watch', auth, async (req, reply) => {
+  if (!own(req, req.params.id)) return reply.code(404).send({ error: 'not_found' });
+  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  return db.prepare('SELECT id, ts, last_ts, title, channel, app_name, blocked FROM watch_log WHERE device_id = ? ORDER BY last_ts DESC LIMIT ?')
+    .all(req.params.id, limit);
+});
+
+app.get('/api/devices/:id/blocked-channels', auth, async (req, reply) => {
+  if (!own(req, req.params.id)) return reply.code(404).send({ error: 'not_found' });
+  return db.prepare('SELECT channel FROM blocked_channels WHERE device_id = ? ORDER BY channel').all(req.params.id).map((r) => r.channel);
+});
+
+app.post('/api/devices/:id/blocked-channels', auth, async (req, reply) => {
+  const d = own(req, req.params.id);
+  if (!d) return reply.code(404).send({ error: 'not_found' });
+  const channel = chanKey(req.body?.channel);
+  if (!channel) return reply.code(400).send({ error: 'invalid_channel' });
+  db.prepare('INSERT OR IGNORE INTO blocked_channels (device_id, channel) VALUES (?, ?)').run(d.id, channel);
+  return { channel };
+});
+
+app.delete('/api/devices/:id/blocked-channels/:channel', auth, async (req, reply) => {
+  const d = own(req, req.params.id);
+  if (!d) return reply.code(404).send({ error: 'not_found' });
+  db.prepare('DELETE FROM blocked_channels WHERE device_id = ? AND channel = ?').run(d.id, chanKey(req.params.channel));
+  return { ok: true };
+});
+
 // ---------- message search (SMS + notifications) ----------
 app.get('/api/devices/:id/search', auth, async (req, reply) => {
   if (!own(req, req.params.id)) return reply.code(404).send({ error: 'not_found' });
@@ -540,6 +571,30 @@ app.post('/api/device/screen-hit', dev, async (req) => {
   return { ok: true };
 });
 
+// What the TV is playing. The same video reported again within 30 minutes extends the
+// existing row instead of adding one, so pauses and metadata refreshes do not repeat it.
+app.post('/api/device/watch', dev, async (req, reply) => {
+  const b = req.body || {};
+  const cut = (v, n) => String(v ?? '').trim().slice(0, n);
+  const title = cut(b.title, 500);
+  if (!title) return reply.code(400).send({ error: 'title_required' });
+  const channel = cut(b.channel, 200) || null;
+  const ts = Number(b.ts) || Date.now();
+  const id = req.device.id;
+  const last = db.prepare("SELECT id, last_ts FROM watch_log WHERE device_id = ? AND title = ? AND coalesce(channel, '') = ? ORDER BY last_ts DESC LIMIT 1")
+    .get(id, title, channel || '');
+  if (last && ts - last.last_ts < 30 * 60 * 1000) {
+    db.prepare('UPDATE watch_log SET last_ts = ?, blocked = max(blocked, ?) WHERE id = ?').run(ts, b.blocked ? 1 : 0, last.id);
+  } else {
+    db.prepare('INSERT INTO watch_log (device_id, ts, last_ts, title, channel, app_name, blocked) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, ts, ts, title, channel, cut(b.app_name, 200) || null, b.blocked ? 1 : 0);
+  }
+  return { ok: true };
+});
+
+app.get('/api/device/blocked-channels', dev, async (req) =>
+  db.prepare('SELECT channel FROM blocked_channels WHERE device_id = ?').all(req.device.id).map((r) => r.channel));
+
 app.get('/api/device/apprules', dev, async (req) =>
   db.prepare('SELECT package, blocked, uninstall, daily_limit_min FROM app_rules WHERE device_id = ?').all(req.device.id));
 
@@ -589,6 +644,7 @@ app.post('/api/device/media', dev, async (req, reply) => {
 });
 
 setInterval(() => offlineWatchdog(app, db), 5 * 60 * 1000);
+setInterval(() => db.prepare('DELETE FROM watch_log WHERE last_ts < ?').run(Date.now() - 180 * 24 * 60 * 60 * 1000), 6 * 60 * 60 * 1000);
 setInterval(() => db.prepare('DELETE FROM dns_log WHERE ts < ?').run(Date.now() - 30 * 24 * 60 * 60 * 1000), 6 * 60 * 60 * 1000);
 
 await app.listen({ port: PORT, host: HOST });
