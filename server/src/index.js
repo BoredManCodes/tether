@@ -375,7 +375,7 @@ app.get('/api/devices/:id/search', auth, async (req, reply) => {
 });
 
 app.get('/api/devices', auth, async (req) =>
-  db.prepare(`SELECT id, name, battery_pct, charging, locked, last_seen,
+  db.prepare(`SELECT id, name, kind, battery_pct, charging, locked, last_seen,
     cell_type, cell_level, cell_dbm, wifi_connected, wifi_ssid, wifi_level, wifi_rssi
     FROM devices`).all());
 
@@ -474,15 +474,15 @@ app.delete('/api/devices/:id', auth, async (req, reply) => {
 
 // ---------- device API ----------
 app.post('/api/device/enroll', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
-  const { email, password, name } = req.body || {};
+  const { email, password, name, kind } = req.body || {};
   const u = typeof email === 'string' && db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase());
   if (!u || typeof password !== 'string' || !verifyPassword(password, u.pw_hash)) {
     return reply.code(401).send({ error: 'invalid_credentials' });
   }
   if (u.must_change) return reply.code(403).send({ error: 'password_change_required' });
   const token = newToken();
-  const r = db.prepare('INSERT INTO devices (user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?)')
-    .run(u.id, String(name || 'Phone').slice(0, 60), sha256(token), Date.now());
+  const r = db.prepare('INSERT INTO devices (user_id, name, token_hash, created_at, kind) VALUES (?, ?, ?, ?, ?)')
+    .run(u.id, String(name || 'Phone').slice(0, 60), sha256(token), Date.now(), kind === 'tv' ? 'tv' : 'phone');
   return { device_id: r.lastInsertRowid, token };
 });
 

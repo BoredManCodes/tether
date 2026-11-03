@@ -181,6 +181,9 @@ async function onChange(ev) {
 const TABS = [['overview', 'Overview'], ['alerts', 'Alerts'], ['messages', 'Messages'], ['calls', 'Calls'], ['notifications', 'Notifications'],
   ['search', 'Search'], ['usage', 'Screen time'], ['photos', 'Photos'], ['schedule', 'Schedule'],
   ['apprules', 'Apps'], ['sites', 'Sites'], ['watch', 'TV'], ['geofences', 'Places'], ['settings', 'Settings']];
+// The TV app only reports what SmartTube plays and blocks channels; the other tabs have no data there.
+const TV_TABS = ['watch', 'alerts', 'settings'];
+const tabsFor = (d) => d?.kind === 'tv' ? TABS.filter(([id]) => TV_TABS.includes(id)) : TABS.filter(([id]) => id !== 'watch');
 
 async function start() {
   try { devices = await api('/api/devices'); } catch { return; }
@@ -194,12 +197,14 @@ function renderShell() {
   const sel = h('select', { class: 'form-select w-auto', onchange: (e) => { deviceId = Number(e.target.value); store.set('tether.device', deviceId); renderShell(); } },
     devices.map((d) => h('option', { value: d.id, selected: d.id === deviceId }, d.name)));
   const body = h('div', { id: 'body' });
+  const tabs = tabsFor(devices.find((d) => d.id === deviceId));
+  if (!tabs.some(([id]) => id === tab)) tab = tabs[0][0];
   root.replaceChildren(
     h('header', { class: 'navbar d-print-none' }, h('div', { class: 'container-xl' },
       h('h1', { class: 'navbar-brand m-0' }, 'Tether'),
       h('div', { class: 'ms-auto d-flex gap-2' }, devices.length ? sel : null, h('button', { class: 'btn', onclick: signOut }, 'Sign out')))),
     h('div', { class: 'page-wrapper' }, h('div', { class: 'container-xl pb-5' },
-      h('ul', { class: 'nav nav-pills tabs-scroll mb-3' }, TABS.map(([id, label]) =>
+      h('ul', { class: 'nav nav-pills tabs-scroll mb-3' }, tabs.map(([id, label]) =>
         h('li', { class: 'nav-item' }, h('a', {
           href: '#', class: `nav-link${id === tab ? ' active' : ''}`, 'aria-current': id === tab ? 'page' : null,
           onclick: (e) => { e.preventDefault(); tab = id; renderShell(); },

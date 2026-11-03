@@ -56,7 +56,7 @@ object Store {
         c.setRequestProperty("Content-Type", "application/json")
         c.doOutput = true
         c.outputStream.use {
-            it.write(JSONObject().put("email", email).put("password", password).put("name", name).toString().toByteArray())
+            it.write(JSONObject().put("email", email).put("password", password).put("name", name).put("kind", "tv").toString().toByteArray())
         }
         val raw = read(c)
         if (c.responseCode != 200) throw ApiException(c.responseCode, raw)
