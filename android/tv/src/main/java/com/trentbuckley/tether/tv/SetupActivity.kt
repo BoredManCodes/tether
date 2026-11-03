@@ -64,7 +64,7 @@ class SetupActivity : Activity() {
             appendLine("Back presser on: $a11yOn")
             appendLine("Blocked channels: ${Store.blocked(this@SetupActivity).joinToString().ifEmpty { "none" }}")
             val meta = Store.lastMeta(this@SetupActivity)
-            if (meta.isNotEmpty()) appendLine("Last SmartTube metadata:\n$meta")
+            if (meta.isNotEmpty()) appendLine("Last media metadata:\n$meta")
         }
     }
 

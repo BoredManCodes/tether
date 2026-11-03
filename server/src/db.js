@@ -164,6 +164,8 @@ export function openDb(dataDir) {
   if (!columns('devices').includes('accessibility_active')) db.exec('ALTER TABLE devices ADD COLUMN accessibility_active INTEGER');
   if (!columns('devices').includes('notif_listener_active')) db.exec('ALTER TABLE devices ADD COLUMN notif_listener_active INTEGER');
   if (!columns('devices').includes('offline_alerted_at')) db.exec('ALTER TABLE devices ADD COLUMN offline_alerted_at INTEGER');
+  if (!columns('users').includes('bypass_salt')) db.exec('ALTER TABLE users ADD COLUMN bypass_salt TEXT');
+  if (!columns('users').includes('bypass_hash')) db.exec('ALTER TABLE users ADD COLUMN bypass_hash TEXT');
   if (!columns('devices').includes('kind')) db.exec("ALTER TABLE devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'phone'");
   if (!columns('devices').includes('adblock')) db.exec('ALTER TABLE devices ADD COLUMN adblock INTEGER NOT NULL DEFAULT 1');
   if (!columns('devices').includes('block_cats')) db.exec("ALTER TABLE devices ADD COLUMN block_cats TEXT NOT NULL DEFAULT 'ads,tracking,scams'");

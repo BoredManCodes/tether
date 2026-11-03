@@ -8,7 +8,7 @@ const store = {
 let token = store.get('tether.token');
 let devices = [];
 let deviceId = Number(store.get('tether.device')) || null;
-let tab = 'overview';
+let tab = store.get('tether.tab') || 'overview';
 let timers = [];
 
 // Tabler themes through data-bs-theme; follow the OS setting.
@@ -181,7 +181,7 @@ async function onChange(ev) {
 const TABS = [['overview', 'Overview'], ['alerts', 'Alerts'], ['messages', 'Messages'], ['calls', 'Calls'], ['notifications', 'Notifications'],
   ['search', 'Search'], ['usage', 'Screen time'], ['photos', 'Photos'], ['schedule', 'Schedule'],
   ['apprules', 'Apps'], ['sites', 'Sites'], ['watch', 'TV'], ['geofences', 'Places'], ['settings', 'Settings']];
-// The TV app only reports what SmartTube plays and blocks channels; the other tabs have no data there.
+// The TV app only reports what media apps play and blocks channels; the other tabs have no data there.
 const TV_TABS = ['watch', 'alerts', 'settings'];
 const tabsFor = (d) => d?.kind === 'tv' ? TABS.filter(([id]) => TV_TABS.includes(id)) : TABS.filter(([id]) => id !== 'watch');
 
@@ -207,7 +207,7 @@ function renderShell() {
       h('ul', { class: 'nav nav-pills tabs-scroll mb-3' }, tabs.map(([id, label]) =>
         h('li', { class: 'nav-item' }, h('a', {
           href: '#', class: `nav-link${id === tab ? ' active' : ''}`, 'aria-current': id === tab ? 'page' : null,
-          onclick: (e) => { e.preventDefault(); tab = id; renderShell(); },
+          onclick: (e) => { e.preventDefault(); tab = id; store.set('tether.tab', id); renderShell(); },
         }, label)))),
       body)));
   if (!deviceId) {
@@ -533,7 +533,7 @@ const VIEWS = {
         try { await addChannel(r.channel); } catch (err) { e.target.textContent = err.message; }
       } }, 'Block channel') : null,
       h('span', { class: 'text-secondary ms-auto' }, fmtTime(r.ts))))), 'Nothing watched yet.'));
-    const chanInput = input({ placeholder: 'Channel name, as SmartTube shows it', class: 'w-auto', style: 'min-width:260px' });
+    const chanInput = input({ placeholder: 'Channel or artist name, as the app shows it', class: 'w-auto', style: 'min-width:260px' });
     const doAdd = async () => {
       try { const c = await addChannel(chanInput.value); chanInput.value = ''; status.textContent = `Blocked ${c}. The TV picks it up within a minute.`; }
       catch (e) { status.textContent = e.message === 'invalid_channel' ? 'Enter a channel name.' : e.message; }
@@ -592,6 +592,8 @@ const VIEWS = {
         mfaBtn.textContent = 'Turn off email codes at sign-in'; me.mfa_enabled = true;
       }
     } }, me.mfa_enabled ? 'Turn off email codes at sign-in' : 'Turn on email codes at sign-in');
+    const bypassInput = input({ type: 'password', autocomplete: 'new-password', placeholder: me.bypass_set ? 'Code is set; type a new one to replace it' : 'e.g. 482915', class: 'w-auto', style: 'min-width:260px' });
+    const bypassStatus = h('span', { class: 'text-secondary' });
     const kwList = h('div', { class: 'd-flex flex-column gap-2' });
     const renderKw = (items) => {
       kwList.replaceChildren(...items.map((k) => h('div', { class: rowFlex }, k.is_regex ? badge('Regex') : '', k.word,
@@ -606,6 +608,14 @@ const VIEWS = {
         h('div', { class: rowFlex }, emailInput, h('button', { class: 'btn btn-primary', onclick: async () => {
           try { await api('/api/auth/alert-email', { method: 'POST', body: { email: emailInput.value || null } }); emailStatus.textContent = 'Saved.'; } catch (e) { emailStatus.textContent = e.message; }
         } }, 'Save'), emailStatus)),
+      formCard(h('b', {}, 'TV bypass code'),
+        h('p', { class: 'text-secondary' }, 'Type this on the TV remote to switch off channel blocking for a set time. 6 to 16 characters: digits 0-9, or U D L R K for up, down, left, right and OK. Digits are safest, because arrow and OK presses also reach the app on screen. The code never appears on the TV.'),
+        h('div', { class: rowFlex }, bypassInput, h('button', { class: 'btn btn-primary', onclick: async () => {
+          try { await api('/api/auth/bypass-code', { method: 'POST', body: { code: bypassInput.value } }); bypassInput.value = ''; bypassStatus.textContent = 'Saved.'; }
+          catch (e) { bypassStatus.textContent = e.message === 'bad_code' ? 'Use 6 to 16 of: 0-9 U D L R K.' : e.message; }
+        } }, 'Save'), h('button', { class: 'btn', onclick: async () => {
+          try { await api('/api/auth/bypass-code', { method: 'DELETE' }); bypassStatus.textContent = 'Removed.'; } catch (e) { bypassStatus.textContent = e.message; }
+        } }, 'Remove'), bypassStatus)),
       formCard(h('b', {}, 'Two-factor sign-in'), h('p', { class: 'text-secondary' }, 'Email a 6-digit code every time someone signs in.'), mfaBtn),
       formCard(h('b', {}, 'Keyword alerts'), h('p', { class: 'text-secondary' }, 'Applies to every phone on this account: SMS, app notifications and on-screen text. Regex is case-insensitive and must match what Java and JavaScript both accept.'),
         kwList, h('div', { class: `${rowFlex} mt-3` }, kwInput, h('label', { class: 'form-check m-0' }, kwRegex, ' Regex'), h('button', { class: 'btn btn-primary', onclick: async () => {

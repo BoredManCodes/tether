@@ -144,8 +144,8 @@ app.get('/download/tether.apk', async (_req, reply) => {
 });
 
 app.get('/api/auth/me', { preHandler: app.requireUser }, async (req) => {
-  const u = db.prepare('SELECT mfa_enabled, alert_email FROM users WHERE id = ?').get(req.user.id);
-  return { ...req.user, mfa_enabled: !!u.mfa_enabled, alert_email: u.alert_email };
+  const u = db.prepare('SELECT mfa_enabled, alert_email, bypass_hash FROM users WHERE id = ?').get(req.user.id);
+  return { ...req.user, mfa_enabled: !!u.mfa_enabled, alert_email: u.alert_email, bypass_set: !!u.bypass_hash };
 });
 
 // ---------- parent API ----------
@@ -169,6 +169,23 @@ app.post('/api/auth/alert-email', auth, async (req, reply) => {
     return reply.code(400).send({ error: 'bad_email' });
   }
   db.prepare('UPDATE users SET alert_email = ? WHERE id = ?').run(email || null, req.user.id);
+  return { ok: true };
+});
+
+// TV bypass code: typed on the remote (digits, or U/D/L/R/K for up/down/left/right/ok).
+// Only a salted hash is stored; the TV compares hashes and never shows the code.
+const bypassHash = (salt, code) => sha256(`${salt}:${code}`);
+
+app.post('/api/auth/bypass-code', auth, async (req, reply) => {
+  const code = String(req.body?.code || '').toUpperCase();
+  if (!/^[0-9UDLRK]{6,16}$/.test(code)) return reply.code(400).send({ error: 'bad_code' });
+  const salt = newToken().slice(0, 16);
+  db.prepare('UPDATE users SET bypass_salt = ?, bypass_hash = ? WHERE id = ?').run(salt, bypassHash(salt, code), req.user.id);
+  return { ok: true };
+});
+
+app.delete('/api/auth/bypass-code', auth, async (req) => {
+  db.prepare('UPDATE users SET bypass_salt = NULL, bypass_hash = NULL WHERE id = ?').run(req.user.id);
   return { ok: true };
 });
 
@@ -594,6 +611,9 @@ app.post('/api/device/watch', dev, async (req, reply) => {
 
 app.get('/api/device/blocked-channels', dev, async (req) =>
   db.prepare('SELECT channel FROM blocked_channels WHERE device_id = ?').all(req.device.id).map((r) => r.channel));
+
+app.get('/api/device/bypass', dev, async () =>
+  db.prepare('SELECT bypass_salt AS salt, bypass_hash AS hash FROM users WHERE bypass_hash IS NOT NULL').all());
 
 app.get('/api/device/apprules', dev, async (req) =>
   db.prepare('SELECT package, blocked, uninstall, daily_limit_min FROM app_rules WHERE device_id = ?').all(req.device.id));

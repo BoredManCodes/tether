@@ -27,9 +27,21 @@ object Store {
     fun blocked(ctx: Context): Set<String> = sp(ctx).getStringSet("blocked", emptySet()) ?: emptySet()
     fun setBlocked(ctx: Context, names: Set<String>) = sp(ctx).edit().putStringSet("blocked", names).apply()
 
-    /** Last metadata SmartTube published, for checking what fields it fills in. */
+    /** Last metadata a media app published, for checking what fields it fills in. */
     fun lastMeta(ctx: Context): String = sp(ctx).getString("last_meta", "") ?: ""
     fun setLastMeta(ctx: Context, v: String) = sp(ctx).edit().putString("last_meta", v).apply()
+
+    /** Parent bypass codes as "salt:hash" pairs (the server never sends the codes themselves). */
+    fun bypassCodes(ctx: Context): Set<String> = sp(ctx).getStringSet("bypass_codes", emptySet()) ?: emptySet()
+    fun setBypassCodes(ctx: Context, v: Set<String>) = sp(ctx).edit().putStringSet("bypass_codes", v).apply()
+
+    /** Epoch millis until which blocking is off; 0 when not bypassed. */
+    fun bypassUntil(ctx: Context): Long = sp(ctx).getLong("bypass_until", 0L)
+    fun setBypassUntil(ctx: Context, t: Long) = sp(ctx).edit().putLong("bypass_until", t).apply()
+    fun bypassActive(ctx: Context) = System.currentTimeMillis() < bypassUntil(ctx)
+
+    fun sha256Hex(s: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
     /** Same normalisation the server applies to stored channel names. */
     fun key(name: String?): String =
@@ -78,6 +90,15 @@ object Store {
         if (c.responseCode !in 200..299) throw ApiException(c.responseCode, raw)
         val arr = JSONArray(raw)
         return (0 until arr.length()).map { key(arr.getString(it)) }.filter { it.isNotEmpty() }.toSet()
+    }
+
+    fun fetchBypass(ctx: Context): Set<String> {
+        val c = authed(ctx, "/api/device/bypass", "GET")
+        val raw = read(c)
+        if (c.responseCode !in 200..299) throw ApiException(c.responseCode, raw)
+        val arr = JSONArray(raw)
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+            .map { "${it.getString("salt")}:${it.getString("hash")}" }.toSet()
     }
 
     fun postWatch(ctx: Context, ts: Long, title: String, channel: String?, app: String, blocked: Boolean) {
