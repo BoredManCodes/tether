@@ -61,10 +61,10 @@ public sealed class TetherApi
         return (all.Where(k => !k.Regex).Select(k => k.Word).ToList(), all.Where(k => k.Regex).Select(k => k.Word).ToList());
     }
 
-    private sealed record AppRuleDto(string Package, bool Blocked, int? DailyLimitMin);
+    private sealed record AppRuleDto(string Package, int Blocked, int? DailyLimitMin);   // server sends 0/1
     public async Task<List<AppRule>> GetAppRulesAsync()
         => (await GetJson<List<AppRuleDto>>("/api/device/apprules").ConfigureAwait(false))
-            .Select(r => new AppRule(r.Package.ToLowerInvariant(), r.Blocked, r.DailyLimitMin)).ToList();
+            .Select(r => new AppRule(r.Package.ToLowerInvariant(), r.Blocked != 0, r.DailyLimitMin)).ToList();
 
     private sealed record ScheduleDto(string Days, int StartMin, int EndMin);
     public async Task<List<ScheduleWindow>> GetScheduleAsync()

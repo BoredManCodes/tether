@@ -1,0 +1,61 @@
+using System.Net;
+using System.Net.Sockets;
+using Microsoft.Extensions.Logging.Abstractions;
+using Tether.Service;
+using Tether.Shared;
+
+namespace Tether.Tests;
+
+public class DnsProxyTests
+{
+    private static readonly byte[] BlockedQuery =
+    {
+        0xAB, 0xCD, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        3, (byte)'b', (byte)'a', (byte)'d', 3, (byte)'c', (byte)'o', (byte)'m', 0, 0x00, 0x01, 0x00, 0x01,
+    };
+
+    private static int FreePort()
+    {
+        using var u = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        return ((IPEndPoint)u.Client.LocalEndPoint!).Port;
+    }
+
+    [Fact]
+    public async Task Ready_is_true_when_the_port_binds_and_blocked_names_get_nxdomain()
+    {
+        var list = new BlockList();
+        list.Load("bad.com");
+        var looked = new List<string>();
+        using var cts = new CancellationTokenSource();
+        var proxy = new DnsProxy(list, new[] { IPAddress.Parse("192.0.2.1") }, looked.Add, FreePort(), NullLogger.Instance);
+        var run = proxy.RunAsync(cts.Token);
+        Assert.True(await proxy.Ready.WaitAsync(TimeSpan.FromSeconds(5)));
+        var reply = await proxy.Answer(BlockedQuery, cts.Token);
+        Assert.Equal(3, reply[3] & 0x0F);
+        Assert.Equal(new[] { "bad.com" }, looked);
+        cts.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Ready_is_false_when_the_port_is_already_taken()
+    {
+        var port = FreePort();
+        using var squatter = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
+        using var cts = new CancellationTokenSource();
+        var proxy = new DnsProxy(new BlockList(), new[] { IPAddress.Parse("192.0.2.1") }, _ => { }, port, NullLogger.Instance);
+        var run = proxy.RunAsync(cts.Token);
+        Assert.False(await proxy.Ready.WaitAsync(TimeSpan.FromSeconds(5)));
+        cts.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Unreachable_upstream_gives_servfail_not_an_exception()
+    {
+        using var cts = new CancellationTokenSource();
+        var proxy = new DnsProxy(new BlockList(), new[] { IPAddress.Parse("192.0.2.1") }, _ => { }, FreePort(), NullLogger.Instance);
+        var reply = await proxy.Answer(BlockedQuery, cts.Token);
+        Assert.Equal(2, reply[3] & 0x0F);
+    }
+}

@@ -51,6 +51,15 @@ public class TetherApiTests
     }
 
     [Fact]
+    public async Task GetAppRules_accepts_the_servers_0_1_integers_and_lowercases_the_package()
+    {
+        var (api, _) = Make("[{\"package\":\"Game.EXE\",\"blocked\":1,\"uninstall\":0,\"daily_limit_min\":null},{\"package\":\"b.exe\",\"blocked\":0,\"uninstall\":0,\"daily_limit_min\":45}]");
+        var rules = await api.GetAppRulesAsync();
+        Assert.Equal(new AppRule("game.exe", true, null), rules[0]);
+        Assert.Equal(new AppRule("b.exe", false, 45), rules[1]);
+    }
+
+    [Fact]
     public async Task Enroll_posts_kind_pc_and_returns_the_token()
     {
         var (api, cap) = Make("{\"device_id\":7,\"token\":\"abc\"}");
