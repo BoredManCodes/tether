@@ -27,6 +27,7 @@ internal sealed class HelperContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly PipeClient _pipe;
     private readonly ScreenStreamer _screen;
+    private readonly KeywordWatch _keywords;
     private readonly System.Threading.Timer _tick;
 
     public HelperContext(HelperConfig cfg)
@@ -48,6 +49,8 @@ internal sealed class HelperContext : ApplicationContext
             },
             () => Environment.TickCount64);
 
+        _keywords = new KeywordWatch(_pipe.Send);
+        _keywords.StartHook();
         _pipe.Received += OnMessage;
         _pipe.Start();
         _tick = new System.Threading.Timer(_ => _ = _screen.TickAsync(), null, 1000, 1000);
@@ -55,6 +58,12 @@ internal sealed class HelperContext : ApplicationContext
 
     private void OnMessage(PipeMsg m)
     {
+        if (m.Type == "keywords")
+        {
+            var k = m.As<KeywordList>();
+            if (k != null) _keywords.UpdateKeywords(k.Plain, k.Regexes);
+            return;
+        }
         if (m.Type != "command") return;
         switch (m.As<CommandMsg>()?.Type)
         {
@@ -69,6 +78,7 @@ internal sealed class HelperContext : ApplicationContext
         if (disposing)
         {
             _tick.Dispose();
+            _keywords.Dispose();
             _pipe.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
