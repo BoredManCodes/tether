@@ -3,3 +3,5 @@ obj/
 *.user
 publish/
 *.pfx
+dist/
+*.cer

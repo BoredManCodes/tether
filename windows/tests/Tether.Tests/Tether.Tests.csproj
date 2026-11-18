@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\Tether.Shared\Tether.Shared.csproj" />
     <ProjectReference Include="..\..\src\Tether.Helper\Tether.Helper.csproj" />
     <ProjectReference Include="..\..\src\Tether.Service\Tether.Service.csproj" />
+    <ProjectReference Include="..\..\src\Tether.Setup\Tether.Setup.csproj" />
   </ItemGroup>
 
 </Project>
