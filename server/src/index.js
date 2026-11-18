@@ -143,6 +143,18 @@ app.get('/download/tether.apk', async (_req, reply) => {
     .send(fs.createReadStream(APK_PATH));
 });
 
+// Windows installer, built by windows/build.ps1. Drop it at <data dir>/tether-setup.exe.
+const SETUP_PATH = path.join(DATA_DIR, 'tether-setup.exe');
+app.get('/download/tether-setup.exe', async (_req, reply) => {
+  let st;
+  try { st = fs.statSync(SETUP_PATH); } catch { return reply.code(404).send({ error: 'no_installer' }); }
+  return reply
+    .header('Content-Type', 'application/vnd.microsoft.portable-executable')
+    .header('Content-Disposition', 'attachment; filename="tether-setup.exe"')
+    .header('Content-Length', st.size)
+    .send(fs.createReadStream(SETUP_PATH));
+});
+
 app.get('/api/auth/me', { preHandler: app.requireUser }, async (req) => {
   const u = db.prepare('SELECT mfa_enabled, alert_email, bypass_hash FROM users WHERE id = ?').get(req.user.id);
   return { ...req.user, mfa_enabled: !!u.mfa_enabled, alert_email: u.alert_email, bypass_set: !!u.bypass_hash };

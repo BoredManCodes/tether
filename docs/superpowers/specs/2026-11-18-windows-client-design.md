@@ -59,7 +59,7 @@ The child uses a standard (non-admin) Windows account. The parent holds the only
 One solution, `windows/`:
 
 - `Tether.Service`: Windows service, runs as LocalSystem, auto-start, recovery set to restart. Owns the server connection, token, sync loop, command long-poll, DNS proxy, adapter DNS settings, browser DoH policy, tamper watching.
-- `Tether.Helper`: runs in the child's session, started at logon by a scheduled task (all-users logon trigger, highest privilege not needed). Tray icon with a "monitored by parent" tooltip. Owns screen capture, UI Automation text, keyboard buffer, foreground tracking, blocked-app overlay, lock. Talks to the service over a named pipe restricted to SYSTEM and the logged-on user.
+- `Tether.Helper`: runs in the child's session, started at logon by a scheduled task whose trigger and principal are the configured child account only (standard rights, interactive token, no stored password; the helper also exits if the signed-in user is not the child). Tray icon with a "monitored by parent" tooltip. Owns screen capture, UI Automation text, keyboard buffer, foreground tracking, blocked-app overlay, lock. Talks to the service over a named pipe restricted to SYSTEM and the logged-on user.
 - `Tether.Shared`: models, API client, keyword matcher.
 - `Tether.Setup`: MSI or signed installer run by the parent from the admin account. Prompts for server URL and parent login, enrols with `kind: 'pc'`, stores the token in a file ACL'd to SYSTEM and Administrators.
 
@@ -74,7 +74,7 @@ Port the rules from `KeywordWatch.kt` unchanged:
 
 ### Live screen (goal 2)
 
-On `SCREEN_START` the helper captures the primary monitor with Windows.Graphics.Capture, scales to 1280 pixels wide, encodes JPEG at quality 60 and posts it to `POST /api/device/screen` every second until `SCREEN_STOP`. `SCREENSHOT` posts one frame. The dashboard card is unchanged. A hard stop after 30 minutes with no stop command avoids a forgotten stream.
+On `SCREEN_START` the helper captures the primary monitor with GDI (`Graphics.CopyFromScreen`), chosen over Windows.Graphics.Capture for no consent border and no WinRT dependency, scales to 1280 pixels wide, encodes JPEG at quality 60 and posts it to `POST /api/device/screen` every second until `SCREEN_STOP`. `SCREENSHOT` posts one frame. The dashboard card is unchanged. A hard stop after 30 minutes with no stop command avoids a forgotten stream.
 
 ### Domain blocking and DNS log (goal 3)
 
