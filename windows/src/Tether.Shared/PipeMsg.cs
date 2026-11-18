@@ -27,3 +27,4 @@ public sealed record RuleList(List<AppRule> Rules);
 public sealed record ScheduleList(List<ScheduleWindow> Windows);
 public sealed record CommandMsg(string Type);
 public sealed record FrameMsg(string B64, long Ts);
+public sealed record UsageList(List<UsageRow> Rows);
