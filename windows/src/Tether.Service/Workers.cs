@@ -26,9 +26,9 @@ public sealed class DnsWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        var upstream = _hub.Config.OriginalDns
+        var upstream = DnsProxy.WithFallbacks(_hub.Config.OriginalDns
             .Select(s => IPAddress.TryParse(s, out var a) ? a : null)
-            .Where(a => a != null && !IPAddress.IsLoopback(a)).Select(a => a!).ToList();
+            .Where(a => a != null).Select(a => a!));
         while (!ct.IsCancellationRequested)
         {
             var proxy = new DnsProxy(_hub.Blocklist, upstream, _hub.RecordLookup, Env.DnsPort, _log);

@@ -17,6 +17,9 @@ public sealed class DnsProxy
 {
     private readonly BlockList _list;
     private readonly IPAddress[] _upstream;
+    private readonly int _upstreamPort;
+    private readonly int _upstreamTimeoutMs;
+    private volatile IPAddress? _lastGood;
     private readonly Action<string> _onLookup;
     private readonly int _port;
     private readonly ILogger _log;
@@ -25,14 +28,26 @@ public sealed class DnsProxy
 
     public Task<bool> Ready => _ready.Task;
 
-    public DnsProxy(BlockList list, IEnumerable<IPAddress> upstream, Action<string> onLookup, int port, ILogger log)
+    public DnsProxy(BlockList list, IEnumerable<IPAddress> upstream, Action<string> onLookup, int port, ILogger log, int upstreamPort = 53, int upstreamTimeoutMs = 3000)
     {
+        _upstreamPort = upstreamPort;
+        _upstreamTimeoutMs = upstreamTimeoutMs;
         _list = list;
         _upstream = upstream.ToArray();
         _onLookup = onLookup;
         _port = port;
         _log = log;
-        if (_upstream.Length == 0) _upstream = new[] { IPAddress.Parse("1.1.1.1") };
+        if (_upstream.Length == 0) _upstream = WithFallbacks(_upstream).ToArray();
+    }
+
+    private static readonly string[] PublicResolvers = { "1.1.1.1", "9.9.9.9" };
+
+    /// <summary>The DNS servers captured at install usually belong to the home router, which is unreachable at school or on a hotspot, so public resolvers are always tried last.</summary>
+    public static List<IPAddress> WithFallbacks(IEnumerable<IPAddress> configured)
+    {
+        var list = configured.Where(a => !IPAddress.IsLoopback(a)).Distinct().ToList();
+        foreach (var r in PublicResolvers.Select(IPAddress.Parse)) if (!list.Contains(r)) list.Add(r);
+        return list;
     }
 
     /// <summary>Runs until cancelled, or until any required listener stops (the caller restarts a fresh proxy).</summary>
@@ -147,15 +162,17 @@ public sealed class DnsProxy
         if (q == null) return DnsPacket.BuildServFail(request);
         _onLookup(q.Value.Name);
         if (_list.IsBlocked(q.Value.Name)) return DnsPacket.BuildNxDomain(request);
-        foreach (var up in _upstream)
+        var good = _lastGood;
+        foreach (var up in _upstream.OrderBy(u => good != null && u.Equals(good) ? 0 : 1))
         {
             try
             {
                 using var udp = new UdpClient(up.AddressFamily);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeout.CancelAfter(3000);
-                await udp.SendAsync(request, new IPEndPoint(up, 53), timeout.Token).ConfigureAwait(false);
+                timeout.CancelAfter(_upstreamTimeoutMs);
+                await udp.SendAsync(request, new IPEndPoint(up, _upstreamPort), timeout.Token).ConfigureAwait(false);
                 var resp = await udp.ReceiveAsync(timeout.Token).ConfigureAwait(false);
+                _lastGood = up;
                 return resp.Buffer;
             }
             catch (Exception) { /* try the next upstream */ }

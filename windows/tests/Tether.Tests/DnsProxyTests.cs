@@ -58,4 +58,37 @@ public class DnsProxyTests
         var reply = await proxy.Answer(BlockedQuery, cts.Token);
         Assert.Equal(2, reply[3] & 0x0F);
     }
+
+    [Fact]
+    public void WithFallbacks_keeps_configured_servers_first_then_adds_public_resolvers_once()
+    {
+        var list = DnsProxy.WithFallbacks(new[] { IPAddress.Parse("192.168.0.1"), IPAddress.Parse("127.0.0.1"), IPAddress.Parse("1.1.1.1") });
+        Assert.Equal(new[] { "192.168.0.1", "1.1.1.1", "9.9.9.9" }, list.Select(a => a.ToString()));
+    }
+
+    [Fact]
+    public async Task Answer_remembers_the_server_that_worked_so_a_dead_home_router_costs_one_timeout_not_every_lookup()
+    {
+        using var fake = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var fakePort = ((IPEndPoint)fake.Client.LocalEndPoint!).Port;
+        using var cts = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                var r = await fake.ReceiveAsync(cts.Token);
+                var reply = (byte[])r.Buffer.Clone();
+                reply[2] |= 0x80;   // QR: response
+                await fake.SendAsync(reply, r.RemoteEndPoint, cts.Token);
+            }
+        }, cts.Token);
+
+        var proxy = new DnsProxy(new BlockList(), new[] { IPAddress.Parse("192.0.2.1"), IPAddress.Loopback }, _ => { }, FreePort(), NullLogger.Instance, upstreamPort: fakePort, upstreamTimeoutMs: 400);
+        var first = await proxy.Answer(BlockedQuery, cts.Token);
+        Assert.Equal(0, first[3] & 0x0F);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await proxy.Answer(BlockedQuery, cts.Token);
+        Assert.True(sw.ElapsedMilliseconds < 300, $"second lookup took {sw.ElapsedMilliseconds} ms");
+        cts.Cancel();
+    }
 }

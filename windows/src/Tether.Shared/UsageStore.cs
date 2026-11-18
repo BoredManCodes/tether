@@ -12,12 +12,16 @@ public sealed class UsageStore
     private readonly Dictionary<(string Day, string Package), (string AppName, long Ms)> _rows = new();
     private readonly object _lock = new();
 
+    private const long MaxDeltaMs = 24L * 60 * 60 * 1000;
+
     public void Add(IEnumerable<UsageRow> deltas)
     {
         lock (_lock)
         {
             foreach (var d in deltas)
             {
+                // The pipe is open to the child account, so a forged report must not be able to lower a total.
+                if (d.ForegroundMs <= 0 || d.ForegroundMs > MaxDeltaMs) continue;
                 var key = (d.Day, d.Package.ToLowerInvariant());
                 _rows.TryGetValue(key, out var cur);
                 _rows[key] = (d.AppName, cur.Ms + d.ForegroundMs);

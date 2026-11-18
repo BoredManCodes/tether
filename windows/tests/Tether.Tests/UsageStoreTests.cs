@@ -57,4 +57,18 @@ public class UsageStoreTests
         s.Add(new[] { new UsageRow("2026-11-18", "a.exe", "A", 1000) });
         Assert.Empty(s.Totals("2026-10-01"));
     }
+
+    [Fact]
+    public void Add_ignores_negative_zero_and_absurd_deltas_so_a_forged_report_cannot_lower_usage()
+    {
+        var store = new UsageStore();
+        store.Add(new[] { new UsageRow("2026-11-18", "game.exe", "Game", 60_000) });
+        store.Add(new[]
+        {
+            new UsageRow("2026-11-18", "game.exe", "Game", -3_600_000),
+            new UsageRow("2026-11-18", "game.exe", "Game", 0),
+            new UsageRow("2026-11-18", "game.exe", "Game", 90_000_000),   // more than a day in one report
+        });
+        Assert.Equal(60_000, store.Totals("2026-11-18")["game.exe"]);
+    }
 }
