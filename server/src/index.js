@@ -499,7 +499,7 @@ app.post('/api/device/enroll', { config: { rateLimit: { max: 5, timeWindow: '1 m
   if (u.must_change) return reply.code(403).send({ error: 'password_change_required' });
   const token = newToken();
   const r = db.prepare('INSERT INTO devices (user_id, name, token_hash, created_at, kind) VALUES (?, ?, ?, ?, ?)')
-    .run(u.id, String(name || 'Phone').slice(0, 60), sha256(token), Date.now(), kind === 'tv' ? 'tv' : 'phone');
+    .run(u.id, String(name || 'Phone').slice(0, 60), sha256(token), Date.now(), kind === 'tv' ? 'tv' : kind === 'pc' ? 'pc' : 'phone');
   return { device_id: r.lastInsertRowid, token };
 });
 

@@ -85,12 +85,23 @@ export function checkGeofences(app, db, deviceId, lat, lon) {
 // Called once per sync with the flags the device reported this tick.
 // Fires only on a 1 -> 0 transition for each flag, not on every sync
 // where it happens to already be off (that would spam every 5 minutes).
+export function tamperMessages(kind) {
+  if (kind === 'pc') {
+    return {
+      admin_active: 'Tether service was stopped',
+      accessibility_active: 'Tether helper was stopped',
+      notif_listener_active: 'Tether DNS or browser policy was changed',
+    };
+  }
+  return {
+    admin_active: 'Device Owner / admin was turned off',
+    accessibility_active: 'Accessibility service was turned off',
+    notif_listener_active: 'Notification access was turned off',
+  };
+}
+
 export function checkTamper(app, db, device, flags) {
-  const checks = [
-    ['admin_active', 'Device Owner / admin was turned off'],
-    ['accessibility_active', 'Accessibility service was turned off'],
-    ['notif_listener_active', 'Notification access was turned off'],
-  ];
+  const checks = Object.entries(tamperMessages(device.kind));
   for (const [key, msg] of checks) {
     if (flags[key] == null) continue;
     const prev = device[key];

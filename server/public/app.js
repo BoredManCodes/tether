@@ -183,7 +183,11 @@ const TABS = [['overview', 'Overview'], ['alerts', 'Alerts'], ['messages', 'Mess
   ['apprules', 'Apps'], ['sites', 'Sites'], ['watch', 'TV'], ['geofences', 'Places'], ['settings', 'Settings']];
 // The TV app only reports what media apps play and blocks channels; the other tabs have no data there.
 const TV_TABS = ['watch', 'alerts', 'settings'];
-const tabsFor = (d) => d?.kind === 'tv' ? TABS.filter(([id]) => TV_TABS.includes(id)) : TABS.filter(([id]) => id !== 'watch');
+// The Windows client reports text hits, screen, DNS, apps and usage; no messages, calls, photos or places.
+const PC_TABS = ['overview', 'alerts', 'search', 'usage', 'apprules', 'sites', 'schedule', 'settings'];
+const tabsFor = (d) => d?.kind === 'tv' ? TABS.filter(([id]) => TV_TABS.includes(id))
+  : d?.kind === 'pc' ? TABS.filter(([id]) => PC_TABS.includes(id))
+  : TABS.filter(([id]) => id !== 'watch');
 
 async function start() {
   try { devices = await api('/api/devices'); } catch { return; }
@@ -244,6 +248,19 @@ function liveScreenCard() {
 
 const VIEWS = {
   async overview(body, d) {
+    if (d.kind === 'pc') {
+      const pcStale = !d.last_seen || Date.now() - d.last_seen > 15 * 60 * 1000;
+      const pcBtn = (label, type, cls = '') => h('button', { class: `btn ${cls}`.trim(), onclick: async (e) => {
+        e.target.disabled = true; try { await sendCommand(type); e.target.textContent = `${label} sent`; } catch (x) { e.target.textContent = x.message; }
+        setTimeout(() => { e.target.textContent = label; e.target.disabled = false; }, 2500);
+      } }, label);
+      body.append(
+        h('div', { class: 'row row-cards mb-3' }, stat(ago(d.last_seen), 'Last check-in', pcStale ? 'text-warning' : ''),
+          stat(d.locked ? 'Locked' : 'Open', d.locked ? 'Locked by parent' : 'Laptop available')),
+        h('div', { class: `card card-body ${rowFlex} flex-row mb-3` }, pcBtn('Lock laptop', 'LOCK', 'btn-outline-danger'), pcBtn('Unlock', 'UNLOCK')),
+        liveScreenCard());
+      return;
+    }
     const [locs] = await Promise.all([api(`/api/devices/${deviceId}/locations?limit=50`)]);
     const stale = !d.last_seen || Date.now() - d.last_seen > 15 * 60 * 1000;
     const actionBtn = (label, type, cls = '') => h('button', { class: `btn ${cls}`.trim(), onclick: async (e) => {
